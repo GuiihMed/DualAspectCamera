@@ -259,6 +259,8 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
     @Published private(set) var activeResolutionLabel: String = "4K UHD"
     @Published private(set) var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     @Published var statusMessage: String?
+    @Published private(set) var isTorchAvailable: Bool = false
+    @Published private(set) var isTorchOn: Bool = false
 
     // MARK: Capture Pipeline Properties
     let session = AVCaptureSession()
@@ -415,11 +417,14 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
 
         let minZoom = rearCamera.minAvailableVideoZoomFactor
         let maxZoom = min(maxAllowedZoom, rearCamera.maxAvailableVideoZoomFactor)
+        let hasTorch = rearCamera.hasTorch && rearCamera.isTorchAvailable
         DispatchQueue.main.async {
             self.minZoomFactor = minZoom
             self.maxZoomFactor = maxZoom
             self.zoomFactor = rearCamera.videoZoomFactor
             self.activeResolutionLabel = resolutionText
+            self.isTorchAvailable = hasTorch
+            self.isTorchOn = (rearCamera.torchMode == .on)
         }
 
         // Video frame interception output (bi-planar 420f YUV, dropping late frames under load).
@@ -550,6 +555,28 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
                 device.unlockForConfiguration()
             } catch {
                 self.publishStatus("Zoom adjustment error: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - Flash / Torch Control
+
+    func toggleTorch() {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.videoDevice, device.hasTorch else { return }
+            do {
+                try device.lockForConfiguration()
+                let targetMode: AVCaptureDevice.TorchMode = (device.torchMode == .on) ? .off : .on
+                if device.isTorchModeSupported(targetMode) {
+                    device.torchMode = targetMode
+                    let isOn = (targetMode == .on)
+                    DispatchQueue.main.async {
+                        self.isTorchOn = isOn
+                    }
+                }
+                device.unlockForConfiguration()
+            } catch {
+                self.publishStatus("Torch error: \(error.localizedDescription)")
             }
         }
     }

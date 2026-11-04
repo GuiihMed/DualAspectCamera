@@ -73,9 +73,12 @@ final class PreviewContainerView: UIView {
 
 // MARK: - 9:16 Safe-Area Visual Framing Guide Overlay
 
-/// Draws the full-screen camera preview with the exact centered 9:16 vertical crop guide and dimmed sides.
+/// Draws the full-screen camera preview with the exact centered 9:16 vertical crop guide,
+/// dimmed flanks, optional rule-of-thirds grid, and center optical reticle.
 struct FramingGuideOverlay: View {
     let isRecording: Bool
+    let showGrid: Bool
+    let maskOpacity: Double
 
     var body: some View {
         GeometryReader { proxy in
@@ -102,9 +105,9 @@ struct FramingGuideOverlay: View {
 
             ZStack {
                 // 1. Dimmed left and right flanks (outside the 9:16 vertical safe zone)
-                if leftMaskWidth > 0 {
+                if leftMaskWidth > 0 && maskOpacity > 0 {
                     Rectangle()
-                        .fill(Color.black.opacity(0.38))
+                        .fill(Color.black.opacity(maskOpacity))
                         .frame(width: leftMaskWidth, height: screenSize.height)
                         .position(
                             x: leftMaskWidth / 2.0,
@@ -112,9 +115,9 @@ struct FramingGuideOverlay: View {
                         )
                 }
 
-                if rightMaskWidth > 0 {
+                if rightMaskWidth > 0 && maskOpacity > 0 {
                     Rectangle()
-                        .fill(Color.black.opacity(0.38))
+                        .fill(Color.black.opacity(maskOpacity))
                         .frame(width: rightMaskWidth, height: screenSize.height)
                         .position(
                             x: verticalCropRect.maxX + (rightMaskWidth / 2.0),
@@ -122,11 +125,31 @@ struct FramingGuideOverlay: View {
                         )
                 }
 
-                // 2. Centered 9:16 Vertical Safe-Area Box
+                // 2. Rule of Thirds Grid inside the 9:16 vertical frame
+                if showGrid {
+                    ThirdsGridShape()
+                        .stroke(
+                            isRecording ? Color.yellow.opacity(0.35) : Color.white.opacity(0.25),
+                            style: StrokeStyle(lineWidth: 1, dash: [4, 4])
+                        )
+                        .frame(width: verticalCropRect.width, height: verticalCropRect.height)
+                        .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
+                }
+
+                // 3. Precision Center Optical Reticle (Crosshair)
+                CenterReticleShape()
+                    .stroke(
+                        isRecording ? Color.yellow.opacity(0.8) : Color.white.opacity(0.65),
+                        lineWidth: 1.2
+                    )
+                    .frame(width: 20, height: 20)
+                    .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
+
+                // 4. Centered 9:16 Vertical Safe-Area Box Border
                 Rectangle()
                     .strokeBorder(
-                        isRecording ? Color.yellow : Color.white,
-                        lineWidth: 1.5
+                        isRecording ? Color.yellow.opacity(0.85) : Color.white.opacity(0.75),
+                        lineWidth: 1.2
                     )
                     .frame(width: verticalCropRect.width, height: verticalCropRect.height)
                     .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
@@ -146,7 +169,7 @@ struct FramingGuideOverlay: View {
                 .stroke(isRecording ? Color.yellow : Color.white, lineWidth: 2)
 
                 // Corner ticks on the 9:16 frame for fast framing alignment
-                CornerTicksShape(tickLength: 20)
+                CornerTicksShape(tickLength: 22)
                     .stroke(
                         isRecording ? Color.yellow : Color.white,
                         style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
@@ -154,31 +177,44 @@ struct FramingGuideOverlay: View {
                     .frame(width: verticalCropRect.width, height: verticalCropRect.height)
                     .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
 
-                // Center crosshair dot inside the 9:16 frame
-                Circle()
-                    .fill(Color.white.opacity(0.5))
-                    .frame(width: 5, height: 5)
-                    .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
-
-                // 3. Badges indicating the dual capture regions
+                // 5. Dual-Aspect Badges
+                // 9:16 Vertical Tag
                 HStack(spacing: 5) {
                     Image(systemName: "iphone")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 9, weight: .bold))
                     Text("9:16 VERTICAL")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
                 }
                 .foregroundStyle(isRecording ? Color.yellow : Color.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3.5)
                 .background(Color.black.opacity(0.65), in: Capsule())
                 .overlay(
                     Capsule()
-                        .strokeBorder(isRecording ? Color.yellow.opacity(0.6) : Color.white.opacity(0.35), lineWidth: 1)
+                        .strokeBorder(isRecording ? Color.yellow.opacity(0.6) : Color.white.opacity(0.3), lineWidth: 0.8)
                 )
                 .position(
                     x: verticalCropRect.midX,
-                    y: verticalCropRect.minY + 28
+                    y: verticalCropRect.minY + 24
                 )
+
+                // 16:9 Horizontal Indicator on left flank
+                if leftMaskWidth > 80 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "tv")
+                            .font(.system(size: 9, weight: .medium))
+                        Text("16:9 FULL")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(Color.white.opacity(0.6))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.45), in: Capsule())
+                    .position(
+                        x: leftMaskWidth / 2.0,
+                        y: verticalCropRect.minY + 24
+                    )
+                }
             }
         }
         .allowsHitTesting(false)
@@ -201,6 +237,56 @@ struct FramingGuideOverlay: View {
         let originY = containerRect.midY - (scaledHeight / 2.0)
 
         return CGRect(x: originX, y: originY, width: scaledWidth, height: scaledHeight)
+    }
+}
+
+// MARK: - Shapes for Guides & Reticles
+
+private struct ThirdsGridShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let oneThirdX = rect.minX + rect.width / 3.0
+        let twoThirdX = rect.minX + (rect.width * 2.0 / 3.0)
+        let oneThirdY = rect.minY + rect.height / 3.0
+        let twoThirdY = rect.minY + (rect.height * 2.0 / 3.0)
+
+        // Vertical lines
+        path.move(to: CGPoint(x: oneThirdX, y: rect.minY))
+        path.addLine(to: CGPoint(x: oneThirdX, y: rect.maxY))
+        path.move(to: CGPoint(x: twoThirdX, y: rect.minY))
+        path.addLine(to: CGPoint(x: twoThirdX, y: rect.maxY))
+
+        // Horizontal lines
+        path.move(to: CGPoint(x: rect.minX, y: oneThirdY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: oneThirdY))
+        path.move(to: CGPoint(x: rect.minX, y: twoThirdY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: twoThirdY))
+
+        return path
+    }
+}
+
+private struct CenterReticleShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let midX = rect.midX
+        let midY = rect.midY
+        let arm: CGFloat = 8
+        let gap: CGFloat = 3
+
+        // Horizontal arms
+        path.move(to: CGPoint(x: midX - arm, y: midY))
+        path.addLine(to: CGPoint(x: midX - gap, y: midY))
+        path.move(to: CGPoint(x: midX + gap, y: midY))
+        path.addLine(to: CGPoint(x: midX + arm, y: midY))
+
+        // Vertical arms
+        path.move(to: CGPoint(x: midX, y: midY - arm))
+        path.addLine(to: CGPoint(x: midX, y: midY - gap))
+        path.move(to: CGPoint(x: midX, y: midY + gap))
+        path.addLine(to: CGPoint(x: midX, y: midY + arm))
+
+        return path
     }
 }
 
@@ -241,6 +327,11 @@ struct CameraView: View {
     @StateObject private var cameraManager = CameraManager()
     @State private var pinchStartZoom: CGFloat?
 
+    // Pro Display Preferences
+    @State private var showGrid: Bool = true
+    @State private var maskOpacity: Double = 0.40 // 0.15, 0.40, 0.65
+    @State private var isPulseAnimating: Bool = false
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -251,26 +342,42 @@ struct CameraView: View {
                 .gesture(pinchToZoomGesture)
 
             // 2. Centered 9:16 Safe-Area Framing Guide over full 16:9 feed
-            FramingGuideOverlay(isRecording: cameraManager.isRecording)
-                .ignoresSafeArea()
+            FramingGuideOverlay(
+                isRecording: cameraManager.isRecording,
+                showGrid: showGrid,
+                maskOpacity: maskOpacity
+            )
+            .ignoresSafeArea()
 
-            // 3. Top & Edge Controls Overlay
-            VStack {
-                topStatusBar
+            // 3. Cinema HUD Overlay (Top & Sides)
+            VStack(spacing: 0) {
+                // Top Cinema Status Bar
+                topCinemaHUD
+                    .padding(.top, 10)
+                    .padding(.horizontal, 16)
+
                 Spacer()
+
+                // Bottom Toast Notification Banner
                 if let banner = cameraManager.statusMessage {
-                    statusBannerView(banner)
+                    statusToastView(banner)
+                        .padding(.bottom, 12)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 20)
 
-            HStack {
-                edgeZoomControl
+            // Left & Right Control Docks (Ergonomic thumb placement in Landscape)
+            HStack(alignment: .center) {
+                // Left Dock: Ergonomic Lens / Zoom Selector
+                leftZoomDock
+                    .padding(.leading, 16)
+
                 Spacer()
-                recordButtonPanel
+
+                // Right Dock: Cinema Shutter & Camera Controls
+                rightControlDock
+                    .padding(.trailing, 16)
             }
-            .padding(.horizontal, 20)
         }
         .statusBarHidden(true)
         .onAppear {
@@ -297,43 +404,197 @@ struct CameraView: View {
             }
     }
 
-    // MARK: - Top Camera Indicator Bar
+    // MARK: - Top Cinema Pro HUD
 
-    private var topStatusBar: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(cameraManager.isRecording ? Color.red : Color.green)
-                .frame(width: 7, height: 7)
+    private var topCinemaHUD: some View {
+        HStack(spacing: 12) {
+            // Left Group: Lens & Format Details
+            HStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    Image(systemName: "camera.aperture")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.yellow)
+                    Text("WIDE 24mm")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3.5)
+                .background(Color.white.opacity(0.12), in: Capsule())
 
-            Text("Main Rear Camera Active")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.9))
+                HStack(spacing: 4) {
+                    Text(cameraManager.activeResolutionLabel)
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white)
+                    Text("30 FPS")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.7))
+                    Text("HEVC")
+                        .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 1)
+                        .background(Color.yellow, in: RoundedRectangle(cornerRadius: 2))
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3.5)
+                .background(Color.white.opacity(0.08), in: Capsule())
+            }
 
-            Text("• \(cameraManager.activeResolutionLabel) 16:9 + 9:16")
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.65))
+            Spacer()
 
-            if cameraManager.thermalState == .serious || cameraManager.thermalState == .critical {
-                Text("• THERMAL THROTTLE (24 FPS)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.orange)
+            // Center Group: Recording State or Dual Capture Tag
+            if cameraManager.isRecording {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                        .opacity(isPulseAnimating ? 0.3 : 1.0)
+                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulseAnimating)
+                        .onAppear { isPulseAnimating = true }
+                        .onDisappear { isPulseAnimating = false }
+
+                    Text("REC")
+                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                        .foregroundStyle(.red)
+
+                    Text(formattedTimecode(cameraManager.recordingDuration))
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(Color.black.opacity(0.75), in: Capsule())
+                .overlay(
+                    Capsule().strokeBorder(Color.red.opacity(0.6), lineWidth: 1)
+                )
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "rectangle.split.2x1")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.yellow)
+                    Text("DUAL REC: 16:9 + 9:16")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.black.opacity(0.55), in: Capsule())
+                .overlay(
+                    Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 0.8)
+                )
+            }
+
+            Spacer()
+
+            // Right Group: Audio, Torch, Grid & System Status
+            HStack(spacing: 8) {
+                // Mic Status
+                HStack(spacing: 3) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.green)
+                    Text("MIC")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3.5)
+                .background(Color.white.opacity(0.08), in: Capsule())
+
+                // Torch Toggle (if available)
+                if cameraManager.isTorchAvailable {
+                    Button {
+                        hapticFeedback(.light)
+                        cameraManager.toggleTorch()
+                    } label: {
+                        Image(systemName: cameraManager.isTorchOn ? "bolt.fill" : "bolt.slash.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(cameraManager.isTorchOn ? Color.yellow : Color.white.opacity(0.7))
+                            .frame(width: 26, height: 26)
+                            .background(cameraManager.isTorchOn ? Color.yellow.opacity(0.2) : Color.white.opacity(0.08), in: Circle())
+                    }
+                }
+
+                // Rule-of-Thirds Grid Toggle
+                Button {
+                    hapticFeedback(.light)
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        showGrid.toggle()
+                    }
+                } label: {
+                    Image(systemName: "grid")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(showGrid ? Color.yellow : Color.white.opacity(0.7))
+                        .frame(width: 26, height: 26)
+                        .background(showGrid ? Color.yellow.opacity(0.2) : Color.white.opacity(0.08), in: Circle())
+                }
+
+                // Thermal Warning (if elevated)
+                if cameraManager.thermalState == .serious || cameraManager.thermalState == .critical {
+                    HStack(spacing: 3) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.orange)
+                        Text("24 FPS")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.orange)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.orange.opacity(0.2), in: Capsule())
+                }
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(.ultraThinMaterial, in: Capsule())
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8)
+        )
         .environment(\.colorScheme, .dark)
     }
 
-    // MARK: - Leading-Edge Vertical Zoom Slider
+    // MARK: - Left Zoom Dock (Lens Switcher & Continuous Adjustment)
 
-    private var edgeZoomControl: some View {
-        VStack(spacing: 10) {
+    private var leftZoomDock: some View {
+        VStack(spacing: 8) {
+            // Active Zoom Factor Display
             Text(String(format: "%.1fx", cameraManager.zoomFactor))
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(.yellow)
-                .frame(width: 46)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.black.opacity(0.6), in: Capsule())
 
+            // Quick Lens Preset Pills
+            VStack(spacing: 6) {
+                ForEach(zoomPresets, id: \.self) { preset in
+                    let isSelected = abs(cameraManager.zoomFactor - preset) < 0.12
+                    Button {
+                        hapticFeedback(.light)
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                            cameraManager.setZoomFactor(preset)
+                        }
+                    } label: {
+                        Text(presetLabel(for: preset))
+                            .font(.system(size: 11, weight: isSelected ? .heavy : .semibold, design: .monospaced))
+                            .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.85))
+                            .frame(width: 34, height: 34)
+                            .background(
+                                isSelected ? Color.yellow : Color.white.opacity(0.12),
+                                in: Circle()
+                            )
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(isSelected ? Color.white : Color.clear, lineWidth: 1)
+                            )
+                    }
+                }
+            }
+
+            // Compact Mini Slider for Fine Precision Tuning
             Slider(
                 value: Binding(
                     get: { Double(cameraManager.zoomFactor) },
@@ -342,80 +603,161 @@ struct CameraView: View {
                 in: Double(cameraManager.minZoomFactor)...Double(cameraManager.maxZoomFactor)
             )
             .tint(.yellow)
-            .frame(width: 165)
+            .frame(width: 80)
             .rotationEffect(.degrees(-90))
-            .frame(width: 36, height: 165)
-
-            Text(String(format: "%.0fx", cameraManager.minZoomFactor))
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.6))
+            .frame(width: 24, height: 80)
+            .padding(.vertical, 10)
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
         .padding(.horizontal, 6)
-        .background(.ultraThinMaterial, in: Capsule())
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8)
+        )
         .environment(\.colorScheme, .dark)
     }
 
-    // MARK: - Trailing-Edge Floating Record / Stop Button
+    private var zoomPresets: [CGFloat] {
+        var list: [CGFloat] = []
+        if cameraManager.minZoomFactor < 0.9 {
+            list.append(0.5)
+        }
+        list.append(contentsOf: [1.0, 2.0, 3.0, 5.0])
+        return list.filter { $0 >= cameraManager.minZoomFactor && $0 <= cameraManager.maxZoomFactor }
+    }
 
-    private var recordButtonPanel: some View {
-        VStack(spacing: 10) {
-            if cameraManager.isRecording {
-                Text(formattedDuration(cameraManager.recordingDuration))
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.red.opacity(0.85), in: Capsule())
+    private func presetLabel(for preset: CGFloat) -> String {
+        if preset == 0.5 { return ".5" }
+        return String(format: "%.0f", preset)
+    }
+
+    // MARK: - Right Control Dock (Cinema Shutter & Mask Controls)
+
+    private var rightControlDock: some View {
+        VStack(spacing: 14) {
+            // Mask Opacity Cycle Button
+            Button {
+                hapticFeedback(.light)
+                cycleMaskOpacity()
+            } label: {
+                VStack(spacing: 2) {
+                    Image(systemName: "circle.lefthalf.filled")
+                        .font(.system(size: 14, weight: .bold))
+                    Text(maskOpacityLabel)
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                }
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 40, height: 40)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle().strokeBorder(Color.white.opacity(0.15), lineWidth: 0.8)
+                )
             }
 
+            // Cinema Shutter Button
             Button {
+                hapticFeedback(.medium)
                 cameraManager.toggleRecording()
             } label: {
                 ZStack {
+                    // Outer Ring with shadow
                     Circle()
-                        .strokeBorder(Color.white, lineWidth: 4)
-                        .frame(width: 72, height: 72)
+                        .strokeBorder(Color.white, lineWidth: 4.5)
+                        .frame(width: 74, height: 74)
+                        .shadow(color: .black.opacity(0.4), radius: 6, x: 0, y: 3)
 
                     if cameraManager.isSaving {
                         ProgressView()
                             .tint(.white)
                     } else {
+                        // Inner Record Shutter Disc / Rounded Stop Square
                         RoundedRectangle(
-                            cornerRadius: cameraManager.isRecording ? 8 : 30,
+                            cornerRadius: cameraManager.isRecording ? 7 : 30,
                             style: .continuous
                         )
-                        .fill(Color.red)
+                        .fill(
+                            LinearGradient(
+                                colors: cameraManager.isRecording
+                                    ? [Color.red, Color(red: 0.85, green: 0.1, blue: 0.1)]
+                                    : [Color(red: 1.0, green: 0.25, blue: 0.25), Color.red],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
                         .frame(
                             width: cameraManager.isRecording ? 28 : 58,
                             height: cameraManager.isRecording ? 28 : 58
                         )
-                        .animation(.easeInOut(duration: 0.18), value: cameraManager.isRecording)
+                        .shadow(color: cameraManager.isRecording ? Color.red.opacity(0.6) : Color.clear, radius: 8)
+                        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: cameraManager.isRecording)
                     }
                 }
             }
             .disabled(!cameraManager.isSessionRunning || cameraManager.isSaving)
             .accessibilityLabel(cameraManager.isRecording ? "Stop Recording" : "Start Recording")
 
-            Text(cameraManager.isRecording ? "Stop" : "Record")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.85))
+            // Status Caption under Shutter
+            Text(cameraManager.isSaving ? "SAVING" : (cameraManager.isRecording ? "STOP" : "REC"))
+                .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                .foregroundStyle(cameraManager.isRecording ? Color.red : Color.white.opacity(0.8))
         }
     }
 
-    private func statusBannerView(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .background(Color.black.opacity(0.72), in: Capsule())
+    // MARK: - Mask Opacity Cycling
+
+    private func cycleMaskOpacity() {
+        if maskOpacity == 0.40 {
+            maskOpacity = 0.65
+        } else if maskOpacity == 0.65 {
+            maskOpacity = 0.15
+        } else {
+            maskOpacity = 0.40
+        }
     }
 
-    private func formattedDuration(_ seconds: TimeInterval) -> String {
+    private var maskOpacityLabel: String {
+        switch maskOpacity {
+        case 0.15: return "15%"
+        case 0.65: return "65%"
+        default: return "40%"
+        }
+    }
+
+    // MARK: - Toast Banner & Feedback
+
+    private func statusToastView(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.green)
+
+            Text(text)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(Color.black.opacity(0.8), in: Capsule())
+        .overlay(
+            Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8)
+        )
+    }
+
+    private func formattedTimecode(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
-        let mins = total / 60
+        let hours = total / 3600
+        let mins = (total % 3600) / 60
         let secs = total % 60
+        if hours > 0 {
+            return String(format: "%02d:%02d:%02d", hours, mins, secs)
+        }
         return String(format: "%02d:%02d", mins, secs)
+    }
+
+    private func hapticFeedback(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
+        let generator = UIImpactFeedbackGenerator(style: style)
+        generator.prepare()
+        generator.impactOccurred()
     }
 }
