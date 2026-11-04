@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: macos-14
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -56,3 +58,15 @@ jobs:
           name: DualAspectCamera-ipa
           path: DualAspectCamera.ipa
           retention-days: 7
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: latest
+          name: "DualAspectCamera Latest IPA"
+          draft: false
+          prerelease: false
+          files: DualAspectCamera.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
