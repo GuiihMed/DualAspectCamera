@@ -191,8 +191,6 @@
 		0A0000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
 				CODE_SIGNING_ALLOWED = NO;
@@ -200,8 +198,14 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "DualAspectCamera needs access to the rear camera to capture simultaneous 16:9 and 9:16 4K video.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "DualAspectCamera needs access to the microphone to record synchronized audio for both video streams.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "DualAspectCamera needs permission to save finalized horizontal and vertical videos to your Photo Library.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "DualAspectCamera needs Photo Library access to export your recorded 16:9 and 9:16 videos.";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeRight UIInterfaceOrientationLandscapeLeft";
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UIViewControllerBasedStatusBarAppearance = NO;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -218,8 +222,6 @@
 		0A0000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
 				CODE_SIGNING_ALLOWED = NO;
@@ -227,8 +229,14 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "DualAspectCamera needs access to the rear camera to capture simultaneous 16:9 and 9:16 4K video.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "DualAspectCamera needs access to the microphone to record synchronized audio for both video streams.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "DualAspectCamera needs permission to save finalized horizontal and vertical videos to your Photo Library.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "DualAspectCamera needs Photo Library access to export your recorded 16:9 and 9:16 videos.";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeRight UIInterfaceOrientationLandscapeLeft";
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UIViewControllerBasedStatusBarAppearance = NO;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
