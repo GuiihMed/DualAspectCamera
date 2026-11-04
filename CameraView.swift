@@ -25,6 +25,7 @@ struct CameraPreviewView: UIViewRepresentable {
         if uiView.previewLayer.session !== cameraManager.session {
             uiView.previewLayer.session = cameraManager.session
         }
+        uiView.enforceHorizontalOrientation()
     }
 }
 
@@ -34,39 +35,58 @@ final class PreviewContainerView: UIView {
     }
 
     var previewLayer: AVCaptureVideoPreviewLayer {
-        // Safe force-cast guaranteed by layerClass override above.
         layer as! AVCaptureVideoPreviewLayer
     }
 
     var onOrientationChange: ((UIInterfaceOrientation) -> Void)?
-    private var lastSyncedOrientation: UIInterfaceOrientation = .unknown
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard let orientation = window?.windowScene?.interfaceOrientation,
-              orientation != .unknown,
-              orientation != lastSyncedOrientation else { return }
-        lastSyncedOrientation = orientation
-        onOrientationChange?(orientation)
+        enforceHorizontalOrientation()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        enforceHorizontalOrientation()
+    }
+
+    func enforceHorizontalOrientation() {
+        guard let connection = previewLayer.connection else { return }
+
+        // Default strictly to Landscape (Horizontal 16:9 feed)
+        let orientation = window?.windowScene?.interfaceOrientation ?? .landscapeRight
+        let effectiveOrientation: UIInterfaceOrientation = (orientation == .landscapeLeft) ? .landscapeLeft : .landscapeRight
+        let angle: CGFloat = (effectiveOrientation == .landscapeLeft) ? 180.0 : 0.0
+
+        if #available(iOS 17.0, *) {
+            if connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
+            }
+        } else {
+            if connection.isVideoOrientationSupported {
+                connection.videoOrientation = (effectiveOrientation == .landscapeLeft) ? .landscapeLeft : .landscapeRight
+            }
+        }
+        onOrientationChange?(effectiveOrientation)
     }
 }
 
 // MARK: - 9:16 Safe-Area Visual Framing Guide Overlay
 
-/// Draws the exact centered 9:16 vertical crop boundary inside the rendered 16:9 camera feed.
+/// Draws the full 16:9 horizontal frame with the exact centered 9:16 vertical crop guide and dimmed sides.
 struct FramingGuideOverlay: View {
     let isRecording: Bool
 
     var body: some View {
         GeometryReader { proxy in
             let containerRect = CGRect(origin: .zero, size: proxy.size)
-            // Compute the exact rendered 16:9 video frame inside the preview layer (.resizeAspect).
+            // Compute the exact rendered 16:9 horizontal video frame inside the preview layer
             let videoRect = AVMakeRect(
                 aspectRatio: CGSize(width: 16, height: 9),
                 insideRect: containerRect
             )
 
-            // Exact 9:16 vertical crop width centered within the 16:9 frame.
+            // Exact 9:16 vertical crop rectangle centered in the middle of the 16:9 feed
             let verticalCropWidth = videoRect.height * (9.0 / 16.0)
             let verticalSafeRect = CGRect(
                 x: videoRect.midX - (verticalCropWidth / 2.0),
@@ -75,42 +95,90 @@ struct FramingGuideOverlay: View {
                 height: videoRect.height
             )
 
+            let leftMaskWidth = max(0, verticalSafeRect.minX - videoRect.minX)
+            let rightMaskWidth = max(0, videoRect.maxX - verticalSafeRect.maxX)
+
             ZStack {
-                // Subtle outer 16:9 border
+                // 1. Dimmed left and right flanks (outside the 9:16 vertical safe zone)
                 Rectangle()
-                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                    .fill(Color.black.opacity(0.38))
+                    .frame(width: leftMaskWidth, height: videoRect.height)
+                    .position(
+                        x: videoRect.minX + (leftMaskWidth / 2.0),
+                        y: videoRect.midY
+                    )
+
+                Rectangle()
+                    .fill(Color.black.opacity(0.38))
+                    .frame(width: rightMaskWidth, height: videoRect.height)
+                    .position(
+                        x: verticalSafeRect.maxX + (rightMaskWidth / 2.0),
+                        y: videoRect.midY
+                    )
+
+                // 2. Subtle outer 16:9 boundary line
+                Rectangle()
+                    .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
                     .frame(width: videoRect.width, height: videoRect.height)
                     .position(x: videoRect.midX, y: videoRect.midY)
 
-                // Centered 9:16 vertical crop safe-area rectangle (two vertical lines + top/bottom border)
+                // 3. Centered 9:16 Vertical Safe-Area Box
                 Rectangle()
                     .strokeBorder(
-                        isRecording ? Color.yellow.opacity(0.75) : Color.white.opacity(0.55),
-                        lineWidth: 1.2
+                        isRecording ? Color.yellow : Color.white,
+                        lineWidth: 1.5
                     )
                     .frame(width: verticalSafeRect.width, height: verticalSafeRect.height)
                     .position(x: verticalSafeRect.midX, y: verticalSafeRect.midY)
 
-                // Corner accent ticks on the 9:16 vertical frame for quick subject alignment
-                CornerTicksShape(tickLength: 14)
+                // Prominent Left Vertical Guide Line
+                Path { path in
+                    path.move(to: CGPoint(x: verticalSafeRect.minX, y: verticalSafeRect.minY))
+                    path.addLine(to: CGPoint(x: verticalSafeRect.minX, y: verticalSafeRect.maxY))
+                }
+                .stroke(isRecording ? Color.yellow : Color.white, lineWidth: 2)
+
+                // Prominent Right Vertical Guide Line
+                Path { path in
+                    path.move(to: CGPoint(x: verticalSafeRect.maxX, y: verticalSafeRect.minY))
+                    path.addLine(to: CGPoint(x: verticalSafeRect.maxX, y: verticalSafeRect.maxY))
+                }
+                .stroke(isRecording ? Color.yellow : Color.white, lineWidth: 2)
+
+                // Corner ticks on the 9:16 frame for fast framing alignment
+                CornerTicksShape(tickLength: 18)
                     .stroke(
-                        isRecording ? Color.yellow : Color.white.opacity(0.9),
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                        isRecording ? Color.yellow : Color.white,
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
                     )
                     .frame(width: verticalSafeRect.width, height: verticalSafeRect.height)
                     .position(x: verticalSafeRect.midX, y: verticalSafeRect.midY)
 
-                // Subtle 9:16 frame tag near bottom of vertical crop zone
-                Text("9:16 CROP")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.65))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.black.opacity(0.35), in: Capsule())
-                    .position(
-                        x: verticalSafeRect.midX,
-                        y: max(verticalSafeRect.minY + 16, verticalSafeRect.maxY - 14)
-                    )
+                // Center crosshair dot inside the 9:16 frame
+                Circle()
+                    .fill(Color.white.opacity(0.45))
+                    .frame(width: 4, height: 4)
+                    .position(x: verticalSafeRect.midX, y: verticalSafeRect.midY)
+
+                // 4. Badges indicating the dual capture regions
+                HStack(spacing: 4) {
+                    Image(systemName: "iphone")
+                        .font(.system(size: 9, weight: .bold))
+                    Text("9:16 VERTICAL")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                }
+                .foregroundStyle(isRecording ? Color.yellow : Color.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.black.opacity(0.6), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(isRecording ? Color.yellow.opacity(0.6) : Color.white.opacity(0.3), lineWidth: 1)
+                )
+                .position(
+                    x: verticalSafeRect.midX,
+                    y: verticalSafeRect.minY + 22
+                )
             }
         }
         .allowsHitTesting(false)
