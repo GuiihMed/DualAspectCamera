@@ -11,7 +11,7 @@ struct CameraPreviewView: UIViewRepresentable {
         let view = PreviewContainerView()
         view.backgroundColor = .black
         view.previewLayer.session = cameraManager.session
-        view.previewLayer.videoGravity = .resizeAspect
+        view.previewLayer.videoGravity = .resizeAspectFill
         view.onOrientationChange = { [weak cameraManager] orientation in
             cameraManager?.updateInterfaceOrientation(orientation)
             if let connection = view.previewLayer.connection {
@@ -73,115 +73,134 @@ final class PreviewContainerView: UIView {
 
 // MARK: - 9:16 Safe-Area Visual Framing Guide Overlay
 
-/// Draws the full 16:9 horizontal frame with the exact centered 9:16 vertical crop guide and dimmed sides.
+/// Draws the full-screen camera preview with the exact centered 9:16 vertical crop guide and dimmed sides.
 struct FramingGuideOverlay: View {
     let isRecording: Bool
 
     var body: some View {
         GeometryReader { proxy in
-            let containerRect = CGRect(origin: .zero, size: proxy.size)
-            // Compute the exact rendered 16:9 horizontal video frame inside the preview layer
-            let videoRect = AVMakeRect(
+            let screenSize = proxy.size
+            let containerRect = CGRect(origin: .zero, size: screenSize)
+
+            // Compute exact 16:9 feed layout with .resizeAspectFill (full screen edge-to-edge)
+            let videoRect = aspectFillRect(
                 aspectRatio: CGSize(width: 16, height: 9),
                 insideRect: containerRect
             )
 
             // Exact 9:16 vertical crop rectangle centered in the middle of the 16:9 feed
             let verticalCropWidth = videoRect.height * (9.0 / 16.0)
-            let verticalSafeRect = CGRect(
+            let verticalCropRect = CGRect(
                 x: videoRect.midX - (verticalCropWidth / 2.0),
-                y: videoRect.minY,
+                y: max(0, videoRect.minY),
                 width: verticalCropWidth,
-                height: videoRect.height
+                height: min(screenSize.height, videoRect.height)
             )
 
-            let leftMaskWidth = max(0, verticalSafeRect.minX - videoRect.minX)
-            let rightMaskWidth = max(0, videoRect.maxX - verticalSafeRect.maxX)
+            let leftMaskWidth = max(0, verticalCropRect.minX)
+            let rightMaskWidth = max(0, screenSize.width - verticalCropRect.maxX)
 
             ZStack {
                 // 1. Dimmed left and right flanks (outside the 9:16 vertical safe zone)
-                Rectangle()
-                    .fill(Color.black.opacity(0.38))
-                    .frame(width: leftMaskWidth, height: videoRect.height)
-                    .position(
-                        x: videoRect.minX + (leftMaskWidth / 2.0),
-                        y: videoRect.midY
-                    )
+                if leftMaskWidth > 0 {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.38))
+                        .frame(width: leftMaskWidth, height: screenSize.height)
+                        .position(
+                            x: leftMaskWidth / 2.0,
+                            y: screenSize.height / 2.0
+                        )
+                }
 
-                Rectangle()
-                    .fill(Color.black.opacity(0.38))
-                    .frame(width: rightMaskWidth, height: videoRect.height)
-                    .position(
-                        x: verticalSafeRect.maxX + (rightMaskWidth / 2.0),
-                        y: videoRect.midY
-                    )
+                if rightMaskWidth > 0 {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.38))
+                        .frame(width: rightMaskWidth, height: screenSize.height)
+                        .position(
+                            x: verticalCropRect.maxX + (rightMaskWidth / 2.0),
+                            y: screenSize.height / 2.0
+                        )
+                }
 
-                // 2. Subtle outer 16:9 boundary line
-                Rectangle()
-                    .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
-                    .frame(width: videoRect.width, height: videoRect.height)
-                    .position(x: videoRect.midX, y: videoRect.midY)
-
-                // 3. Centered 9:16 Vertical Safe-Area Box
+                // 2. Centered 9:16 Vertical Safe-Area Box
                 Rectangle()
                     .strokeBorder(
                         isRecording ? Color.yellow : Color.white,
                         lineWidth: 1.5
                     )
-                    .frame(width: verticalSafeRect.width, height: verticalSafeRect.height)
-                    .position(x: verticalSafeRect.midX, y: verticalSafeRect.midY)
+                    .frame(width: verticalCropRect.width, height: verticalCropRect.height)
+                    .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
 
                 // Prominent Left Vertical Guide Line
                 Path { path in
-                    path.move(to: CGPoint(x: verticalSafeRect.minX, y: verticalSafeRect.minY))
-                    path.addLine(to: CGPoint(x: verticalSafeRect.minX, y: verticalSafeRect.maxY))
+                    path.move(to: CGPoint(x: verticalCropRect.minX, y: verticalCropRect.minY))
+                    path.addLine(to: CGPoint(x: verticalCropRect.minX, y: verticalCropRect.maxY))
                 }
                 .stroke(isRecording ? Color.yellow : Color.white, lineWidth: 2)
 
                 // Prominent Right Vertical Guide Line
                 Path { path in
-                    path.move(to: CGPoint(x: verticalSafeRect.maxX, y: verticalSafeRect.minY))
-                    path.addLine(to: CGPoint(x: verticalSafeRect.maxX, y: verticalSafeRect.maxY))
+                    path.move(to: CGPoint(x: verticalCropRect.maxX, y: verticalCropRect.minY))
+                    path.addLine(to: CGPoint(x: verticalCropRect.maxX, y: verticalCropRect.maxY))
                 }
                 .stroke(isRecording ? Color.yellow : Color.white, lineWidth: 2)
 
                 // Corner ticks on the 9:16 frame for fast framing alignment
-                CornerTicksShape(tickLength: 18)
+                CornerTicksShape(tickLength: 20)
                     .stroke(
                         isRecording ? Color.yellow : Color.white,
                         style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
                     )
-                    .frame(width: verticalSafeRect.width, height: verticalSafeRect.height)
-                    .position(x: verticalSafeRect.midX, y: verticalSafeRect.midY)
+                    .frame(width: verticalCropRect.width, height: verticalCropRect.height)
+                    .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
 
                 // Center crosshair dot inside the 9:16 frame
                 Circle()
-                    .fill(Color.white.opacity(0.45))
-                    .frame(width: 4, height: 4)
-                    .position(x: verticalSafeRect.midX, y: verticalSafeRect.midY)
+                    .fill(Color.white.opacity(0.5))
+                    .frame(width: 5, height: 5)
+                    .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
 
-                // 4. Badges indicating the dual capture regions
-                HStack(spacing: 4) {
+                // 3. Badges indicating the dual capture regions
+                HStack(spacing: 5) {
                     Image(systemName: "iphone")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                     Text("9:16 VERTICAL")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
                 }
                 .foregroundStyle(isRecording ? Color.yellow : Color.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Color.black.opacity(0.6), in: Capsule())
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.black.opacity(0.65), in: Capsule())
                 .overlay(
                     Capsule()
-                        .strokeBorder(isRecording ? Color.yellow.opacity(0.6) : Color.white.opacity(0.3), lineWidth: 1)
+                        .strokeBorder(isRecording ? Color.yellow.opacity(0.6) : Color.white.opacity(0.35), lineWidth: 1)
                 )
                 .position(
-                    x: verticalSafeRect.midX,
-                    y: verticalSafeRect.minY + 22
+                    x: verticalCropRect.midX,
+                    y: verticalCropRect.minY + 28
                 )
             }
         }
         .allowsHitTesting(false)
+    }
+
+    private func aspectFillRect(aspectRatio: CGSize, insideRect containerRect: CGRect) -> CGRect {
+        let containerAspect = containerRect.width / containerRect.height
+        let videoAspect = aspectRatio.width / aspectRatio.height
+        let scale: CGFloat
+
+        if containerAspect > videoAspect {
+            scale = containerRect.width / aspectRatio.width
+        } else {
+            scale = containerRect.height / aspectRatio.height
+        }
+
+        let scaledWidth = aspectRatio.width * scale
+        let scaledHeight = aspectRatio.height * scale
+        let originX = containerRect.midX - (scaledWidth / 2.0)
+        let originY = containerRect.midY - (scaledHeight / 2.0)
+
+        return CGRect(x: originX, y: originY, width: scaledWidth, height: scaledHeight)
     }
 }
 
