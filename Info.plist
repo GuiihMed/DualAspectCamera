@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>DualAspectCamera needs access to the rear camera to capture simultaneous 16:9 and 9:16 4K video.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>DualAspectCamera needs access to the microphone to record synchronized audio for both video streams.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>DualAspectCamera needs permission to save finalized horizontal and vertical videos to your Photo Library.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>DualAspectCamera needs Photo Library access to export your recorded 16:9 and 9:16 videos.</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+	</array>
+	<key>UIStatusBarHidden</key>
+	<true/>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+</dict>
+</plist>

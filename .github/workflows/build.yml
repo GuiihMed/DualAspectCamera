@@ -1,0 +1,42 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Show Xcode Version
+        run: xcodebuild -version
+
+      - name: Build DualAspectCamera.app
+        run: |
+          xcodebuild -project DualAspectCamera.xcodeproj \
+                     -scheme DualAspectCamera \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     -destination 'generic/platform=iOS' \
+                     -derivedDataPath ./build/DerivedData \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGN_IDENTITY="" \
+                     clean build
+
+      - name: Package Payload into IPA
+        run: |
+          mkdir -p Payload
+          cp -r ./build/DerivedData/Build/Products/Release-iphoneos/DualAspectCamera.app Payload/
+          zip -r DualAspectCamera.ipa Payload/
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DualAspectCamera-ipa
+          path: DualAspectCamera.ipa
+          retention-days: 7
