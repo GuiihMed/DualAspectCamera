@@ -204,7 +204,7 @@ final class AspectAssetWriter {
         }
     }
 
-    func finish(completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
+    func finish(completion: @escaping (Result<URL, Error>) -> Void) {
         guard writer.status == .writing else {
             completion(.failure(writer.error ?? CameraError.writerNotRecording))
             return
@@ -226,6 +226,21 @@ final class AspectAssetWriter {
             } else {
                 completion(.failure(assetWriter.error ?? CameraError.writerFinishFailed))
             }
+        }
+    }
+}
+
+private final class WriterBatchResult: @unchecked Sendable {
+    var savedURLs: [URL] = []
+    var finishErrors: [Error] = []
+    private let lock = NSLock()
+
+    func record(_ result: Result<URL, Error>) {
+        lock.lock()
+        defer { lock.unlock() }
+        switch result {
+        case .success(let url): savedURLs.append(url)
+        case .failure(let error): finishErrors.append(error)
         }
     }
 }
@@ -595,44 +610,35 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
             }
 
             let group = DispatchGroup()
-            var savedURLs: [URL] = []
-            var finishErrors: [Error] = []
-            let stateLock = NSLock()
+            let batchResult = WriterBatchResult()
 
             group.enter()
             hWriter.finish { result in
-                stateLock.lock()
-                switch result {
-                case .success(let url): savedURLs.append(url)
-                case .failure(let error): finishErrors.append(error)
-                }
-                stateLock.unlock()
+                batchResult.record(result)
                 group.leave()
             }
 
             group.enter()
             vWriter.finish { result in
-                stateLock.lock()
-                switch result {
-                case .success(let url): savedURLs.append(url)
-                case .failure(let error): finishErrors.append(error)
-                }
-                stateLock.unlock()
+                batchResult.record(result)
                 group.leave()
             }
 
             group.notify(queue: .global(qos: .userInitiated)) { [weak self] in
                 guard let self else { return }
-                if !finishErrors.isEmpty || savedURLs.count < 2 {
-                    self.cleanupTempFiles(savedURLs)
-                    let msg = finishErrors.first?.localizedDescription ?? "Failed to finalize dual video."
+                let urls = batchResult.savedURLs
+                let errors = batchResult.finishErrors
+
+                if !errors.isEmpty || urls.count < 2 {
+                    self.cleanupTempFiles(urls)
+                    let msg = errors.first?.localizedDescription ?? "Failed to finalize dual video."
                     DispatchQueue.main.async {
                         self.isSaving = false
                         self.statusMessage = msg
                     }
                     return
                 }
-                self.saveVideosToPhotoLibrary(urls: savedURLs)
+                self.saveVideosToPhotoLibrary(urls: urls)
             }
         }
     }
