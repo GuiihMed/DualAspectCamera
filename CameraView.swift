@@ -491,11 +491,11 @@ struct CameraView: View {
 
             HStack(spacing: 1.5) {
                 ForEach(0..<3, id: \.self) { idx in
-                    let threshold = CGFloat(idx + 1) * 0.33
+                    let threshold = CGFloat(Double(idx + 1) * 0.33)
                     let isActive = simulatedAudioLevel >= threshold
                     RoundedRectangle(cornerRadius: 1)
                         .fill(Color.white.opacity(isActive ? 1.0 : 0.25))
-                        .frame(width: 2, height: CGFloat(4 + idx * 2.5))
+                        .frame(width: 2, height: CGFloat(4.0 + Double(idx) * 2.5))
                 }
             }
         }
