@@ -368,12 +368,14 @@ struct CameraView: View {
                         .transition(.opacity)
                 }
 
-                // 4. Ultra-Thin Lateral Exposure Slider
-                lateralExposureSlider(screenHeight: proxy.size.height)
-                    .position(
-                        x: isLandscape ? proxy.size.width - max(28, safeInsets.trailing + 12) : proxy.size.width - 18,
-                        y: proxy.size.height / 2.0
-                    )
+                // 4. Ultra-Thin Lateral Exposure Slider (Shown on right edge only in Portrait; in Landscape it is cleanly nested in the Left Column)
+                if !isLandscape {
+                    lateralExposureSlider(trackHeight: 150)
+                        .position(
+                            x: proxy.size.width - 18,
+                            y: proxy.size.height / 2.0
+                        )
+                }
 
                 // 5. Main Responsive UI Layout
                 if isLandscape {
@@ -438,34 +440,41 @@ struct CameraView: View {
         }
     }
 
-    // MARK: - Landscape Layout (Dock on Right side for thumb ergonomics)
+    // MARK: - Landscape Layout (Left Controls, Clean Center Safe Zone, Right Shutter)
 
     private func landscapeLayout(proxy: GeometryProxy, safeInsets: EdgeInsets) -> some View {
         HStack(spacing: 0) {
-            // Left Zone: Interactive Zoom Control
-            VStack {
-                Spacer()
-                interactiveZoomControl
-                    .padding(.leading, max(24, safeInsets.leading))
-                    .padding(.bottom, max(16, safeInsets.bottom))
-            }
-
-            Spacer()
-
-            // Center: Top Settings Bar anchored at the physical top
-            VStack {
+            // LEFT COLUMN (Left Thumb Zone): Top Settings Bar + Exposure Slider + Interactive Zoom Dial
+            VStack(alignment: .leading, spacing: 0) {
+                // Top Settings Bar (Pinned to top-left, 100% outside 9:16 safe zone!)
                 topSettingsBar
+                    .scaleEffect(0.90, anchor: .topLeading)
                     .padding(.top, max(10, safeInsets.top))
+                    .padding(.leading, max(16, safeInsets.leading))
+
                 Spacer()
+
+                // Exposure Slider + Interactive Zoom Dial (Ergonomic left thumb control)
+                HStack(alignment: .bottom, spacing: 14) {
+                    lateralExposureSlider(trackHeight: 120)
+                    interactiveZoomControl
+                }
+                .padding(.leading, max(20, safeInsets.leading))
+                .padding(.bottom, max(16, safeInsets.bottom))
             }
 
             Spacer()
 
-            // Right Zone: Shutter, Carousel, Gallery Dock
-            VStack(spacing: 16) {
+            // CENTER: 100% PRISTINE & UNOBSTRUCTED 9:16 SAFE ZONE
+            // No UI elements here so creator view is 100% clean
+
+            Spacer()
+
+            // RIGHT COLUMN (Right Thumb Zone): Mode Carousel, Shutter REC, Gallery, Flip
+            VStack(spacing: 14) {
                 Spacer()
                 landscapeControlDock
-                    .padding(.trailing, max(20, safeInsets.trailing))
+                    .padding(.trailing, max(24, safeInsets.trailing))
                 Spacer()
             }
         }
@@ -660,7 +669,7 @@ struct CameraView: View {
 
     // MARK: - Ultra-Thin Lateral Exposure Slider (Controle de Luz)
 
-    private func lateralExposureSlider(screenHeight: CGFloat) -> some View {
+    private func lateralExposureSlider(trackHeight: CGFloat = 140) -> some View {
         HStack(spacing: 4) {
             // EV Readout while dragging
             if isAdjustingExposure {
@@ -678,7 +687,7 @@ struct CameraView: View {
                 // Track: 2px thickness with 12% opacity at rest; 4px on touch
                 RoundedRectangle(cornerRadius: 2)
                     .fill(Color.white.opacity(isAdjustingExposure ? 0.85 : 0.12))
-                    .frame(width: isAdjustingExposure ? 4 : 2, height: 160)
+                    .frame(width: isAdjustingExposure ? 4 : 2, height: trackHeight)
                     .animation(.easeInOut(duration: 0.2), value: isAdjustingExposure)
 
                 // Sun Indicator Thumb
@@ -691,13 +700,13 @@ struct CameraView: View {
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(.white)
                     )
-                    .offset(y: (1.0 - exposureValue) * 136)
+                    .offset(y: (1.0 - exposureValue) * max(0, trackHeight - 24))
             }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         isAdjustingExposure = true
-                        let clamped = min(max(1.0 - (value.location.y / 160.0), 0.0), 1.0)
+                        let clamped = min(max(1.0 - (value.location.y / trackHeight), 0.0), 1.0)
                         exposureValue = clamped
                         cameraManager.setExposureBias(normalized: clamped)
                     }
@@ -708,7 +717,7 @@ struct CameraView: View {
                     }
             )
         }
-        .frame(height: 180)
+        .frame(height: trackHeight + 20)
     }
 
     // MARK: - Interactive Tactile Zoom Dial & Precision Wheel
@@ -877,8 +886,8 @@ struct CameraView: View {
 
     private var landscapeControlDock: some View {
         VStack(spacing: 16) {
-            // Mode Carousel (compact vertical stack)
-            VStack(spacing: 10) {
+            // Mode Carousel (compact horizontal pill)
+            HStack(spacing: 8) {
                 ForEach(CameraCaptureMode.allCases, id: \.self) { mode in
                     let isSelected = activeMode == mode
                     Button {
@@ -887,17 +896,26 @@ struct CameraView: View {
                     } label: {
                         Text(mode.rawValue)
                             .font(.system(size: 10, weight: isSelected ? .bold : .medium, design: .monospaced))
-                            .foregroundStyle(.white)
-                            .opacity(isSelected ? 1.0 : 0.4)
+                            .foregroundStyle(isSelected ? .white : .white.opacity(0.45))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(
+                                isSelected ? Color.white.opacity(0.18) : Color.clear,
+                                in: Capsule()
+                            )
                     }
                 }
             }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Color.black.opacity(0.45), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
 
-            // Main Shutter
+            // Main Shutter Button
             mainShutterButton
 
             // Bottom row: Gallery & Quick Photo
-            HStack(spacing: 14) {
+            HStack(spacing: 16) {
                 galleryButton
                 quickPhotoButton
             }
@@ -955,11 +973,21 @@ struct CameraView: View {
                         .fill(Color.white)
                         .frame(width: 58, height: 58)
                 } else {
+                    let coreColor: Color = {
+                        if cameraManager.isRecording {
+                            return Color.red
+                        } else if activeMode == .cine {
+                            return Color(red: 0.88, green: 0.20, blue: 0.20)
+                        } else {
+                            return Color(red: 0.95, green: 0.22, blue: 0.22)
+                        }
+                    }()
+
                     RoundedRectangle(
                         cornerRadius: cameraManager.isRecording ? 6 : 28,
                         style: .continuous
                     )
-                    .fill(cameraManager.isRecording ? Color.red : Color.white)
+                    .fill(coreColor)
                     .frame(
                         width: cameraManager.isRecording ? 28 : 56,
                         height: cameraManager.isRecording ? 28 : 56

@@ -31,6 +31,39 @@
       0% { opacity: 0.9; }
       100% { opacity: 0; }
     }
+    @media (orientation: landscape) {
+      header {
+        top: 10px !important;
+        left: 20px !important;
+        right: auto !important;
+        margin: 0 !important;
+        transform: scale(0.88);
+        transform-origin: top left;
+      }
+      #exposureContainer {
+        left: 20px !important;
+        right: auto !important;
+        bottom: 16px !important;
+        top: auto !important;
+        transform: none !important;
+      }
+      #zoomContainer {
+        left: 56px !important;
+        right: auto !important;
+        bottom: 16px !important;
+        margin: 0 !important;
+        transform: none !important;
+      }
+      footer {
+        right: 24px !important;
+        left: auto !important;
+        top: 50% !important;
+        bottom: auto !important;
+        transform: translateY(-50%) !important;
+        width: auto !important;
+        gap: 12px !important;
+      }
+    }
   </style>
 </head>
 <body class="bg-black text-white h-screen w-screen relative overflow-hidden select-none">
@@ -113,7 +146,7 @@
   </header>
 
   <!-- DISCADOR DE ZOOM INTERATIVO (0.5x Ultra-Wide a 5x com régua de precisão) -->
-  <aside class="absolute bottom-24 inset-x-0 mx-auto w-fit z-30 pointer-events-auto flex flex-col items-center gap-1.5 touch-none">
+  <aside id="zoomContainer" class="absolute bottom-24 inset-x-0 mx-auto w-fit z-30 pointer-events-auto flex flex-col items-center gap-1.5 touch-none">
     <!-- Régua / Indicador Flutuante ao Arrastar -->
     <div id="zoomRulerContainer" class="opacity-0 transition-opacity duration-200 flex flex-col items-center gap-1 pointer-events-none">
       <div id="zoomFloatLabel" class="font-mono text-[13px] font-bold px-2.5 py-0.5 rounded-full bg-black/80 border border-white/20 text-white">1.0×</div>
@@ -168,7 +201,7 @@
       <!-- Botão Central (Obturador Foto ou Vídeo REC) -->
       <div class="flex flex-col items-center gap-1">
         <button id="shutterBtn" class="relative w-18 h-18 rounded-full border-2 border-white/85 p-1 flex items-center justify-center active:scale-95 transition-all">
-          <div id="shutterCore" class="w-14 h-14 rounded-full bg-white transition-all duration-300"></div>
+          <div id="shutterCore" class="w-14 h-14 rounded-full bg-red-500 transition-all duration-300"></div>
         </button>
       </div>
 
@@ -409,6 +442,7 @@
           activeFPS = 24;
           updateQualityLabel();
           initCamera();
+          shutterCore.className = 'w-14 h-14 rounded-full bg-red-600 transition-all duration-300';
           showToast('Modo Cinema (24 FPS)');
         } else if (mode === 'FOTO') {
           shutterCore.className = 'w-14 h-14 rounded-full bg-white transition-all duration-300';
@@ -416,6 +450,7 @@
         } else {
           activeFPS = 30;
           updateQualityLabel();
+          shutterCore.className = 'w-14 h-14 rounded-full bg-red-500 transition-all duration-300';
           showToast('Modo Vídeo (30 FPS)');
         }
         renderCropGuides(window.innerWidth > window.innerHeight);
@@ -498,7 +533,7 @@
         }
       } else {
         // Parar
-        shutterCore.className = 'w-14 h-14 rounded-full bg-white transition-all duration-300';
+        shutterCore.className = currentMode === 'FOTO' ? 'w-14 h-14 rounded-full bg-white transition-all duration-300' : (currentMode === 'CINE' ? 'w-14 h-14 rounded-full bg-red-600 transition-all duration-300' : 'w-14 h-14 rounded-full bg-red-500 transition-all duration-300');
         recordingTimerBadge.classList.add('hidden');
         recordingTimerBadge.classList.remove('flex');
         clearInterval(recTimer);
