@@ -36,6 +36,41 @@
       box-sizing: border-box;
       touch-action: manipulation;
     }
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation-duration: 200ms;
+      animation-timing-function: ease-in-out;
+    }
+    #qualityMenu[popover] {
+      position: absolute;
+      inset: unset;
+      margin: 0;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(23, 23, 23, 0.96);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-radius: 0.75rem;
+      padding: 0.25rem;
+      color: white;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+    }
+    #qualityMenu:popover-open {
+      display: block;
+    }
+    .touch-target-48 {
+      position: relative;
+    }
+    .touch-target-48::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      min-width: 48px;
+      min-height: 48px;
+      width: 100%;
+      height: 100%;
+    }
     #zoomContainer {
       bottom: calc(max(1.5rem, env(safe-area-inset-bottom, 24px)) + 125px);
     }
@@ -124,57 +159,57 @@
   </div>
 
   <!-- PAINEL SUPERIOR CONSOLIDADO (DROPDOWN DE QUALIDADE, VU METER, TOGGLES) -->
-  <header class="absolute top-4 inset-x-0 mx-auto w-fit z-30 pointer-events-auto">
-    <div class="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-white/[0.06] backdrop-blur-2xl border border-white/10 shadow-2xl">
+  <header class="absolute top-4 inset-x-0 mx-auto w-fit z-30 pointer-events-auto" role="toolbar" aria-label="Controles superiores da câmera">
+    <div class="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-white/[0.06] backdrop-blur-2xl border border-white/10 shadow-2xl">
       <!-- Seletor de Qualidade -->
       <div class="relative">
-        <button id="btnQuality" class="flex items-center gap-1.5 text-[10px] font-mono font-bold tracking-tight text-white/90 px-2 py-0.5 rounded-full bg-white/10">
+        <button id="btnQuality" popovertarget="qualityMenu" aria-haspopup="menu" aria-expanded="false" aria-label="Qualidade de gravação e taxa de quadros" class="touch-target-48 flex items-center gap-1.5 text-[10px] font-mono font-bold tracking-tight text-white/90 px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all">
           <span id="qualityLabel">4K UHD · 30FPS</span>
           <i data-lucide="chevron-down" class="w-3 h-3 opacity-60"></i>
         </button>
-        <!-- Dropdown Menu -->
-        <div id="qualityMenu" class="hidden absolute top-8 left-0 w-36 bg-neutral-900/95 backdrop-blur-xl border border-white/15 rounded-xl p-1 shadow-2xl z-50 text-[10px] font-mono">
-          <div class="px-2 py-1 text-white/40 text-[9px] uppercase font-bold">Resolução</div>
-          <button data-res="4K" class="quality-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white font-bold flex justify-between">4K UHD <span>✓</span></button>
-          <button data-res="1080p" class="quality-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white/80 flex justify-between">1080p FHD <span></span></button>
-          <button data-res="720p" class="quality-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white/80 flex justify-between">720p HD <span></span></button>
-          <div class="h-[1px] bg-white/10 my-1"></div>
-          <div class="px-2 py-1 text-white/40 text-[9px] uppercase font-bold">Taxa (FPS)</div>
-          <button data-fps="60" class="fps-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white/80 flex justify-between">60 FPS <span></span></button>
-          <button data-fps="30" class="fps-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white font-bold flex justify-between">30 FPS <span>✓</span></button>
-          <button data-fps="24" class="fps-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white/80 flex justify-between">24 FPS (Cine) <span></span></button>
+        <!-- Dropdown Menu com suporte a Popover API -->
+        <div id="qualityMenu" popover="auto" role="menu" aria-label="Resolução e FPS" class="hidden absolute top-8 left-0 w-36 bg-neutral-900/95 backdrop-blur-xl border border-white/15 rounded-xl p-1 shadow-2xl z-50 text-[10px] font-mono">
+          <div class="px-2 py-1 text-white/40 text-[9px] uppercase font-bold" role="presentation">Resolução</div>
+          <button data-res="4K" role="menuitem" class="quality-item touch-target-48 w-full text-left px-2 py-2 rounded hover:bg-white/10 text-white font-bold flex justify-between items-center">4K UHD <span>✓</span></button>
+          <button data-res="1080p" role="menuitem" class="quality-item touch-target-48 w-full text-left px-2 py-2 rounded hover:bg-white/10 text-white/80 flex justify-between items-center">1080p FHD <span></span></button>
+          <button data-res="720p" role="menuitem" class="quality-item touch-target-48 w-full text-left px-2 py-2 rounded hover:bg-white/10 text-white/80 flex justify-between items-center">720p HD <span></span></button>
+          <div class="h-[1px] bg-white/10 my-1" role="separator"></div>
+          <div class="px-2 py-1 text-white/40 text-[9px] uppercase font-bold" role="presentation">Taxa (FPS)</div>
+          <button data-fps="60" role="menuitem" class="fps-item touch-target-48 w-full text-left px-2 py-2 rounded hover:bg-white/10 text-white/80 flex justify-between items-center">60 FPS <span></span></button>
+          <button data-fps="30" role="menuitem" class="fps-item touch-target-48 w-full text-left px-2 py-2 rounded hover:bg-white/10 text-white font-bold flex justify-between items-center">30 FPS <span>✓</span></button>
+          <button data-fps="24" role="menuitem" class="fps-item touch-target-48 w-full text-left px-2 py-2 rounded hover:bg-white/10 text-white/80 flex justify-between items-center">24 FPS (Cine) <span></span></button>
         </div>
       </div>
 
       <!-- Timer quando gravando (oculto em repouso) -->
-      <div id="recordingTimerBadge" class="hidden items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-[10px] font-mono font-bold text-white">
+      <div id="recordingTimerBadge" role="status" aria-live="polite" aria-label="Tempo de gravação" class="hidden items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/20 border border-red-500/40 text-[10px] font-mono font-bold text-white">
         <div class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
         <span id="timecodeTop">00:00</span>
       </div>
 
-      <div class="w-[1px] h-3 bg-white/15"></div>
+      <div class="w-[1px] h-3 bg-white/15" role="separator"></div>
 
       <!-- Microfone & VU Meter Real -->
-      <div class="flex items-center gap-1.5">
+      <div class="flex items-center gap-1.5 px-1" title="Entrada de áudio" aria-label="Nível de captação de som">
         <i data-lucide="mic" class="w-3 h-3 text-white/80"></i>
-        <div class="flex items-end gap-[1.5px] h-2.5 w-2.5">
+        <div class="flex items-end gap-[1.5px] h-2.5 w-2.5" aria-hidden="true">
           <div id="vu1" class="w-[2px] bg-white rounded-full h-[33%] opacity-100 transition-all duration-75"></div>
           <div id="vu2" class="w-[2px] bg-white rounded-full h-[66%] opacity-30 transition-all duration-75"></div>
           <div id="vu3" class="w-[2px] bg-white rounded-full h-[100%] opacity-30 transition-all duration-75"></div>
         </div>
       </div>
 
-      <div class="w-[1px] h-3 bg-white/15"></div>
+      <div class="w-[1px] h-3 bg-white/15" role="separator"></div>
 
       <!-- Toggles: Grade, Lanterna, Trocar Câmera -->
-      <div class="flex items-center gap-2">
-        <button id="btnGrid" class="p-1 rounded-full text-white opacity-100 hover:opacity-100 transition-opacity" title="Grade">
+      <div class="flex items-center gap-1">
+        <button id="btnGrid" aria-label="Alternar grade de enquadramento 3x3" aria-pressed="true" class="touch-target-48 p-1.5 rounded-full text-white opacity-100 hover:opacity-100 transition-opacity flex items-center justify-center">
           <i data-lucide="grid-3x3" class="w-3.5 h-3.5"></i>
         </button>
-        <button id="btnTorch" class="p-1 rounded-full text-white opacity-40 hover:opacity-100 transition-opacity" title="Lanterna">
+        <button id="btnTorch" aria-label="Alternar lanterna" aria-pressed="false" class="touch-target-48 p-1.5 rounded-full text-white opacity-40 hover:opacity-100 transition-opacity flex items-center justify-center">
           <i data-lucide="flashlight" class="w-3.5 h-3.5"></i>
         </button>
-        <button id="btnFlip" class="p-1 rounded-full text-white opacity-80 hover:opacity-100 transition-opacity" title="Trocar Câmera">
+        <button id="btnFlip" aria-label="Inverter câmera frontal e traseira" class="touch-target-48 p-1.5 rounded-full text-white opacity-80 hover:opacity-100 transition-opacity flex items-center justify-center">
           <i data-lucide="switch-camera" class="w-3.5 h-3.5"></i>
         </button>
       </div>
@@ -182,9 +217,9 @@
   </header>
 
   <!-- DISCADOR DE ZOOM INTERATIVO (0.5x Ultra-Wide a 5x com régua de precisão) -->
-  <aside id="zoomContainer" class="absolute bottom-24 inset-x-0 mx-auto w-fit z-30 pointer-events-auto flex flex-col items-center gap-1.5 touch-none">
+  <aside id="zoomContainer" aria-label="Controle de Zoom" class="absolute bottom-24 inset-x-0 mx-auto w-fit z-30 pointer-events-auto flex flex-col items-center gap-1.5 touch-none">
     <!-- Régua / Indicador Flutuante ao Arrastar -->
-    <div id="zoomRulerContainer" class="opacity-0 transition-opacity duration-200 flex flex-col items-center gap-1 pointer-events-none">
+    <div id="zoomRulerContainer" class="opacity-0 transition-opacity duration-200 flex flex-col items-center gap-1 pointer-events-none" aria-hidden="true">
       <div id="zoomFloatLabel" class="font-mono text-[13px] font-bold px-2.5 py-0.5 rounded-full bg-black/80 border border-white/20 text-white">1.0×</div>
       <div class="flex items-center gap-1 h-3 opacity-60">
         <div class="w-[1px] h-2 bg-white/40"></div>
@@ -198,28 +233,28 @@
     </div>
 
     <!-- Pílula de Lentes [.5] [1] [2] [3] [5] -->
-    <div id="zoomDialPill" class="flex items-center gap-1 rounded-full bg-white/[0.08] backdrop-blur-2xl border border-white/12 p-1 shadow-2xl">
-      <button data-zoom="0.5" class="zoom-btn w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">.5</button>
-      <button data-zoom="1.0" class="zoom-btn w-7 h-7 rounded-full font-mono text-[10px] bg-white text-black font-bold flex items-center justify-center transition-all">1</button>
-      <button data-zoom="2.0" class="zoom-btn w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">2</button>
-      <button data-zoom="3.0" class="zoom-btn w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">3</button>
-      <button data-zoom="5.0" class="zoom-btn w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">5</button>
+    <div id="zoomDialPill" class="flex items-center gap-1 rounded-full bg-white/[0.08] backdrop-blur-2xl border border-white/12 p-1 shadow-2xl" role="group" aria-label="Predefinições de zoom óptico e digital">
+      <button data-zoom="0.5" aria-label="Zoom 0.5x Ultra-Wide" class="zoom-btn touch-target-48 w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">.5</button>
+      <button data-zoom="1.0" aria-label="Zoom 1x Grande-Angular" class="zoom-btn touch-target-48 w-7 h-7 rounded-full font-mono text-[10px] bg-white text-black font-bold flex items-center justify-center transition-all">1</button>
+      <button data-zoom="2.0" aria-label="Zoom 2x Telefoto" class="zoom-btn touch-target-48 w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">2</button>
+      <button data-zoom="3.0" aria-label="Zoom 3x Telefoto" class="zoom-btn touch-target-48 w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">3</button>
+      <button data-zoom="5.0" aria-label="Zoom 5x Telefoto" class="zoom-btn touch-target-48 w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">5</button>
     </div>
   </aside>
 
   <!-- CONTROLO PRINCIPAL (CARROSSEL, SHUTTER, FOTO RÁPIDA, GALERIA) -->
   <footer class="absolute bottom-6 inset-x-0 z-30 flex flex-col items-center gap-4 pointer-events-auto">
     <!-- Carrossel de Modos: FOTO | VÍDEO | CINE -->
-    <nav class="flex items-center gap-6">
-      <button class="mode-btn flex flex-col items-center gap-1 text-white/40 font-mono text-[11px] tracking-widest uppercase" data-mode="FOTO">
+    <nav class="flex items-center gap-6" role="tablist" aria-label="Modos de captura da câmera">
+      <button class="mode-btn touch-target-48 flex flex-col items-center gap-1 text-white/40 font-mono text-[11px] tracking-widest uppercase" data-mode="FOTO" role="tab" aria-selected="false" aria-label="Modo Foto">
         <span>FOTO</span>
         <div class="w-1 h-1 rounded-full bg-transparent"></div>
       </button>
-      <button class="mode-btn flex flex-col items-center gap-1 text-white font-bold font-mono text-[11px] tracking-widest uppercase" data-mode="VÍDEO">
+      <button class="mode-btn touch-target-48 flex flex-col items-center gap-1 text-white font-bold font-mono text-[11px] tracking-widest uppercase" data-mode="VÍDEO" role="tab" aria-selected="true" aria-label="Modo Vídeo">
         <span>VÍDEO</span>
         <div class="w-1 h-1 rounded-full bg-white"></div>
       </button>
-      <button class="mode-btn flex flex-col items-center gap-1 text-white/40 font-mono text-[11px] tracking-widest uppercase" data-mode="CINE">
+      <button class="mode-btn touch-target-48 flex flex-col items-center gap-1 text-white/40 font-mono text-[11px] tracking-widest uppercase" data-mode="CINE" role="tab" aria-selected="false" aria-label="Modo Cinema 24 FPS">
         <span>CINE</span>
         <div class="w-1 h-1 rounded-full bg-transparent"></div>
       </button>
@@ -228,7 +263,7 @@
     <!-- Tríade de Captura -->
     <div id="captureTriad" class="w-full max-w-xs px-6 flex items-center justify-between">
       <!-- Miniatura Galeria -->
-      <button id="btnGallery" class="w-11 h-11 rounded-xl bg-white/[0.06] backdrop-blur-xl border border-white/20 p-0.5 flex items-center justify-center hover:opacity-80 active:scale-95 transition-all overflow-hidden" title="Galeria">
+      <button id="btnGallery" class="touch-target-48 w-11 h-11 rounded-xl bg-white/[0.06] backdrop-blur-xl border border-white/20 p-0.5 flex items-center justify-center hover:opacity-80 active:scale-95 transition-all overflow-hidden" aria-label="Abrir galeria de mídia">
         <div id="galleryThumbContainer" class="w-full h-full rounded-[10px] bg-neutral-900 flex items-center justify-center">
           <i data-lucide="image" class="w-4 h-4 text-white/70"></i>
         </div>
@@ -236,20 +271,20 @@
 
       <!-- Botão Central (Obturador Foto ou Vídeo REC) -->
       <div class="shutter-wrapper flex flex-col items-center gap-1">
-        <button id="shutterBtn" class="relative w-18 h-18 rounded-full border-2 border-white/85 p-1 flex items-center justify-center active:scale-95 transition-all">
+        <button id="shutterBtn" aria-label="Iniciar gravação de vídeo" class="relative w-18 h-18 rounded-full border-2 border-white/85 p-1 flex items-center justify-center active:scale-95 transition-all">
           <div id="shutterCore" class="w-14 h-14 rounded-full bg-red-500 transition-all duration-300"></div>
         </button>
       </div>
 
       <!-- Botão Foto Rápida / Trocar -->
-      <button id="btnQuickPhoto" class="w-11 h-11 rounded-full bg-white/[0.06] backdrop-blur-xl border border-white/20 flex items-center justify-center hover:bg-white/10 active:scale-90 transition-all" title="Foto Rápida">
+      <button id="btnQuickPhoto" class="touch-target-48 w-11 h-11 rounded-full bg-white/[0.06] backdrop-blur-xl border border-white/20 flex items-center justify-center hover:bg-white/10 active:scale-90 transition-all" aria-label="Tirar foto rápida em alta resolução">
         <i data-lucide="camera" class="w-4 h-4 text-white"></i>
       </button>
     </div>
   </footer>
 
   <!-- Toast de Notificação -->
-  <div id="toastMessage" class="absolute bottom-24 inset-x-0 mx-auto w-fit px-3 py-1.5 rounded-full bg-neutral-900/90 border border-white/20 text-[11px] font-medium text-white shadow-2xl opacity-0 pointer-events-none transition-opacity duration-300 z-50"></div>
+  <div id="toastMessage" role="status" aria-live="polite" class="absolute bottom-24 inset-x-0 mx-auto w-fit px-3 py-1.5 rounded-full bg-neutral-900/90 border border-white/20 text-[11px] font-medium text-white shadow-2xl opacity-0 pointer-events-none transition-opacity duration-300 z-50"></div>
 
   <script>
     lucide.createIcons();
@@ -494,46 +529,87 @@
       zoomRulerContainer.style.opacity = '0';
     });
 
-    // 5. Trocar Câmera (Front/Back)
+    // Helper para transições fluidas com View Transitions API
+    function withViewTransition(fn) {
+      if (typeof document.startViewTransition === 'function') {
+        return document.startViewTransition(fn);
+      } else {
+        fn();
+      }
+    }
+
+    // 5. Toggles: Lanterna e Trocar Câmera
+    let isTorchOn = false;
+    const btnTorch = document.getElementById('btnTorch');
+    btnTorch.addEventListener('click', async () => {
+      if (!videoStream) return;
+      const track = videoStream.getVideoTracks()[0];
+      if (!track) return;
+      try {
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        if (caps.torch) {
+          isTorchOn = !isTorchOn;
+          await track.applyConstraints({ advanced: [{ torch: isTorchOn }] });
+          btnTorch.setAttribute('aria-pressed', isTorchOn ? 'true' : 'false');
+          btnTorch.className = isTorchOn 
+            ? 'touch-target-48 p-1.5 rounded-full text-yellow-400 opacity-100 transition-opacity flex items-center justify-center'
+            : 'touch-target-48 p-1.5 rounded-full text-white opacity-40 hover:opacity-100 transition-opacity flex items-center justify-center';
+          showToast(isTorchOn ? 'Lanterna ligada' : 'Lanterna desligada');
+        } else {
+          showToast('Lanterna não disponível nesta lente');
+        }
+      } catch (err) {
+        console.warn('Erro ao alternar lanterna:', err);
+        showToast('Lanterna não suportada');
+      }
+    });
+
     document.getElementById('btnFlip').addEventListener('click', () => {
       activeFacingMode = activeFacingMode === 'environment' ? 'user' : 'environment';
       initCamera();
       showToast(activeFacingMode === 'environment' ? 'Câmera Traseira' : 'Câmera Frontal');
     });
 
-    // 6. Seleção de Modos: FOTO | VÍDEO | CINE
+    // 6. Seleção de Modos: FOTO | VÍDEO | CINE (com View Transitions)
     const shutterBtn = document.getElementById('shutterBtn');
     const shutterCore = document.getElementById('shutterCore');
 
     document.querySelectorAll('.mode-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const mode = btn.getAttribute('data-mode');
-        currentMode = mode;
-        document.querySelectorAll('.mode-btn').forEach(b => {
-          b.classList.remove('text-white', 'font-bold');
-          b.classList.add('text-white/40');
-          b.querySelector('div').className = 'w-1 h-1 rounded-full bg-transparent';
-        });
-        btn.classList.remove('text-white/40');
-        btn.classList.add('text-white', 'font-bold');
-        btn.querySelector('div').className = 'w-1 h-1 rounded-full bg-white';
+        withViewTransition(() => {
+          currentMode = mode;
+          document.querySelectorAll('.mode-btn').forEach(b => {
+            b.classList.remove('text-white', 'font-bold');
+            b.classList.add('text-white/40');
+            b.setAttribute('aria-selected', 'false');
+            b.querySelector('div').className = 'w-1 h-1 rounded-full bg-transparent';
+          });
+          btn.classList.remove('text-white/40');
+          btn.classList.add('text-white', 'font-bold');
+          btn.setAttribute('aria-selected', 'true');
+          btn.querySelector('div').className = 'w-1 h-1 rounded-full bg-white';
 
-        if (mode === 'CINE') {
-          activeFPS = 24;
-          updateQualityLabel();
-          initCamera();
-          shutterCore.className = 'w-14 h-14 rounded-full bg-red-600 transition-all duration-300';
-          showToast('Modo Cinema (24 FPS)');
-        } else if (mode === 'FOTO') {
-          shutterCore.className = 'w-14 h-14 rounded-full bg-white transition-all duration-300';
-          showToast('Modo Foto');
-        } else {
-          activeFPS = 30;
-          updateQualityLabel();
-          shutterCore.className = 'w-14 h-14 rounded-full bg-red-500 transition-all duration-300';
-          showToast('Modo Vídeo (30 FPS)');
-        }
-        renderCropGuides(window.innerWidth > window.innerHeight);
+          if (mode === 'CINE') {
+            activeFPS = 24;
+            updateQualityLabel();
+            initCamera();
+            shutterBtn.setAttribute('aria-label', 'Iniciar gravação de vídeo cine');
+            shutterCore.className = 'w-14 h-14 rounded-full bg-red-600 transition-all duration-300';
+            showToast('Modo Cinema (24 FPS)');
+          } else if (mode === 'FOTO') {
+            shutterBtn.setAttribute('aria-label', 'Tirar foto');
+            shutterCore.className = 'w-14 h-14 rounded-full bg-white transition-all duration-300';
+            showToast('Modo Foto');
+          } else {
+            activeFPS = 30;
+            updateQualityLabel();
+            shutterBtn.setAttribute('aria-label', 'Iniciar gravação de vídeo');
+            shutterCore.className = 'w-14 h-14 rounded-full bg-red-500 transition-all duration-300';
+            showToast('Modo Vídeo (30 FPS)');
+          }
+          renderCropGuides(window.innerWidth > window.innerHeight);
+        });
       });
     });
 
@@ -571,7 +647,7 @@
 
       // Atualizar miniatura da galeria
       const thumbContainer = document.getElementById('galleryThumbContainer');
-      thumbContainer.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover rounded-[10px]" />`;
+      thumbContainer.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover rounded-[10px]" alt="Última foto capturada" />`;
 
       // Se executando no Android nativo via WebView
       if (window.AndroidBridge && window.AndroidBridge.saveImage) {
@@ -610,6 +686,7 @@
       isRecording = !isRecording;
       if (isRecording) {
         // Gravar
+        shutterBtn.setAttribute('aria-label', 'Parar gravação de vídeo');
         shutterCore.className = 'w-7 h-7 rounded-[6px] bg-red-500 transition-all duration-300';
         recordingTimerBadge.classList.remove('hidden');
         recordingTimerBadge.classList.add('flex');
@@ -666,6 +743,7 @@
         }
       } else {
         // Parar
+        shutterBtn.setAttribute('aria-label', currentMode === 'FOTO' ? 'Tirar foto' : 'Iniciar gravação de vídeo');
         shutterCore.className = currentMode === 'FOTO' ? 'w-14 h-14 rounded-full bg-white transition-all duration-300' : (currentMode === 'CINE' ? 'w-14 h-14 rounded-full bg-red-600 transition-all duration-300' : 'w-14 h-14 rounded-full bg-red-500 transition-all duration-300');
         recordingTimerBadge.classList.add('hidden');
         recordingTimerBadge.classList.remove('flex');
@@ -676,12 +754,44 @@
       }
     });
 
-    // 9. Dropdown de Qualidade
+    // 9. Dropdown de Qualidade (Modern Web Popover API com Fallback e Light Dismiss)
     const btnQuality = document.getElementById('btnQuality');
     const qualityMenu = document.getElementById('qualityMenu');
+
+    function positionQualityMenu() {
+      const rect = btnQuality.getBoundingClientRect();
+      qualityMenu.style.top = `${rect.bottom + 8}px`;
+      qualityMenu.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - 160))}px`;
+    }
+
+    if (qualityMenu && typeof qualityMenu.showPopover === 'function') {
+      qualityMenu.addEventListener('toggle', (e) => {
+        const isOpen = e.newState === 'open';
+        btnQuality.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        if (isOpen) {
+          positionQualityMenu();
+        }
+      });
+    }
+
     btnQuality.addEventListener('click', () => {
-      qualityMenu.classList.toggle('hidden');
+      if (typeof qualityMenu.showPopover !== 'function') {
+        const isHidden = qualityMenu.classList.toggle('hidden');
+        btnQuality.setAttribute('aria-expanded', !isHidden ? 'true' : 'false');
+        if (!isHidden) {
+          positionQualityMenu();
+        }
+      }
     });
+
+    function closeQualityMenu() {
+      if (typeof qualityMenu.hidePopover === 'function') {
+        try { qualityMenu.hidePopover(); } catch (e) {}
+      } else {
+        qualityMenu.classList.add('hidden');
+      }
+      btnQuality.setAttribute('aria-expanded', 'false');
+    }
 
     function updateQualityLabel() {
       document.getElementById('qualityLabel').innerText = `${activeResolution} UHD · ${activeFPS}FPS`;
@@ -690,8 +800,10 @@
     document.querySelectorAll('.quality-item').forEach(btn => {
       btn.addEventListener('click', () => {
         activeResolution = btn.getAttribute('data-res');
+        document.querySelectorAll('.quality-item span').forEach(s => s.innerText = '');
+        btn.querySelector('span').innerText = '✓';
         updateQualityLabel();
-        qualityMenu.classList.add('hidden');
+        closeQualityMenu();
         initCamera();
         showToast(`Qualidade: ${activeResolution}`);
       });
@@ -700,8 +812,10 @@
     document.querySelectorAll('.fps-item').forEach(btn => {
       btn.addEventListener('click', () => {
         activeFPS = parseInt(btn.getAttribute('data-fps'), 10);
+        document.querySelectorAll('.fps-item span').forEach(s => s.innerText = '');
+        btn.querySelector('span').innerText = '✓';
         updateQualityLabel();
-        qualityMenu.classList.add('hidden');
+        closeQualityMenu();
         initCamera();
         showToast(`Taxa: ${activeFPS} FPS`);
       });
@@ -716,11 +830,14 @@
       }
     });
 
-    // 11. Guias de Corte
+    // 11. Guias de Corte (com animação View Transitions)
     let showGrid = true;
     document.getElementById('btnGrid').addEventListener('click', () => {
       showGrid = !showGrid;
-      renderCropGuides(window.innerWidth > window.innerHeight);
+      document.getElementById('btnGrid').setAttribute('aria-pressed', showGrid ? 'true' : 'false');
+      withViewTransition(() => {
+        renderCropGuides(window.innerWidth > window.innerHeight);
+      });
     });
 
     function renderCropGuides(isLandscape) {
@@ -795,7 +912,9 @@
       `;
     }
 
-    window.addEventListener('resize', () => renderCropGuides(window.innerWidth > window.innerHeight));
+    window.addEventListener('resize', () => {
+      withViewTransition(() => renderCropGuides(window.innerWidth > window.innerHeight));
+    });
 
     initCamera();
     renderCropGuides(window.innerWidth > window.innerHeight);
