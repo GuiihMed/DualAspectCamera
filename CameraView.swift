@@ -383,14 +383,6 @@ struct CameraView: View {
                         .padding(.bottom, max(14, safeInsets.bottom))
                 }
             }
-            .onAppear {
-                self.isLandscape = isCurrentLandscape
-                updateOrientationAngle(for: isCurrentLandscape)
-            }
-            .onChange(of: isCurrentLandscape) { newValue in
-                self.isLandscape = newValue
-                updateOrientationAngle(for: newValue)
-            }
         }
         .statusBarHidden(true)
         .onAppear {
@@ -429,16 +421,6 @@ struct CameraView: View {
         }
     }
 
-    private func updateOrientationAngle(for isLand: Bool) {
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
-            if isLand {
-                uiRotationAngle = (UIDevice.current.orientation == .landscapeRight) ? -90.0 : 90.0
-            } else {
-                uiRotationAngle = 0.0
-            }
-        }
-    }
-
     // MARK: - Synchronized Pinch-to-Zoom Gesture
 
     private var pinchToZoomGesture: some Gesture {
@@ -457,106 +439,109 @@ struct CameraView: View {
 
     // MARK: - Top Settings Bar (Quality Dropdown, Mic VU, Toggles)
 
-    private var topSettingsBar: some View {
-        HStack(spacing: 8) {
-            // Quality Dropdown Pill ("4K UHD · 30FPS ⌄")
-            HStack(spacing: 4) {
-                Text("\(cameraManager.activeResolutionLabel) · 30FPS")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+    private var qualityDropdownPill: some View {
+        HStack(spacing: 4) {
+            Text("\(cameraManager.activeResolutionLabel) · 30FPS")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white)
+
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .rotationEffect(.degrees(uiRotationAngle))
+        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color.white.opacity(0.08), in: Capsule())
+    }
+
+    @ViewBuilder
+    private var recordingStatusPill: some View {
+        if cameraManager.isRecording {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 6, height: 6)
+                    .opacity(isPulseAnimating ? 0.3 : 1.0)
+                    .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulseAnimating)
+                    .onAppear { isPulseAnimating = true }
+                    .onDisappear { isPulseAnimating = false }
+
+                Text(formattedTimecode(cameraManager.recordingDuration))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
-                    .rotationEffect(.degrees(uiRotationAngle))
-                    .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
-
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .rotationEffect(.degrees(uiRotationAngle))
-                    .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Color.white.opacity(0.08), in: Capsule())
+            .rotationEffect(.degrees(uiRotationAngle))
+            .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+        } else {
+            Text("DUAL 16:9 + 9:16")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.65))
+                .rotationEffect(.degrees(uiRotationAngle))
+                .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+        }
+    }
 
-            dividerLine
+    private var audioVUMeterPill: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "mic.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(.white.opacity(0.8))
 
-            // Dual Stream or Recording Status
-            if cameraManager.isRecording {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 6, height: 6)
-                        .opacity(isPulseAnimating ? 0.3 : 1.0)
-                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulseAnimating)
-                        .onAppear { isPulseAnimating = true }
-                        .onDisappear { isPulseAnimating = false }
-
-                    Text(formattedTimecode(cameraManager.recordingDuration))
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .rotationEffect(.degrees(uiRotationAngle))
-                        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
-                }
-            } else {
-                Text("DUAL 16:9 + 9:16")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.65))
-                    .rotationEffect(.degrees(uiRotationAngle))
-                    .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
-            }
-
-            dividerLine
-
-            // Micro VU Meter + Mic
-            HStack(spacing: 3) {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .rotationEffect(.degrees(uiRotationAngle))
-                    .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
-
-                HStack(spacing: 1.5) {
-                    ForEach(0..<3, id: \.self) { idx in
-                        let threshold = CGFloat(idx + 1) * 0.33
-                        let isActive = simulatedAudioLevel >= threshold
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(Color.white.opacity(isActive ? 1.0 : 0.25))
-                            .frame(width: 2, height: CGFloat(4 + idx * 2.5))
-                    }
+            HStack(spacing: 1.5) {
+                ForEach(0..<3, id: \.self) { idx in
+                    let threshold = CGFloat(idx + 1) * 0.33
+                    let isActive = simulatedAudioLevel >= threshold
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.white.opacity(isActive ? 1.0 : 0.25))
+                        .frame(width: 2, height: CGFloat(4 + idx * 2.5))
                 }
             }
+        }
+        .rotationEffect(.degrees(uiRotationAngle))
+        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+    }
 
-            dividerLine
+    private var topTogglesGroup: some View {
+        HStack(spacing: 6) {
+            Button {
+                hapticFeedback(.light)
+                withAnimation(.easeInOut(duration: 0.15)) { showGrid.toggle() }
+            } label: {
+                Image(systemName: "grid")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .opacity(showGrid ? 1.0 : 0.4)
+                    .frame(width: 24, height: 24)
+            }
 
-            // Toggles: Grid & Torch
-            HStack(spacing: 6) {
+            if cameraManager.isTorchAvailable {
                 Button {
                     hapticFeedback(.light)
-                    withAnimation(.easeInOut(duration: 0.15)) { showGrid.toggle() }
+                    cameraManager.toggleTorch()
                 } label: {
-                    Image(systemName: "grid")
+                    Image(systemName: cameraManager.isTorchOn ? "bolt.fill" : "bolt.slash.fill")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white)
-                        .opacity(showGrid ? 1.0 : 0.4)
-                        .rotationEffect(.degrees(uiRotationAngle))
-                        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+                        .opacity(cameraManager.isTorchOn ? 1.0 : 0.4)
                         .frame(width: 24, height: 24)
                 }
-
-                if cameraManager.isTorchAvailable {
-                    Button {
-                        hapticFeedback(.light)
-                        cameraManager.toggleTorch()
-                    } label: {
-                        Image(systemName: cameraManager.isTorchOn ? "bolt.fill" : "bolt.slash.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .opacity(cameraManager.isTorchOn ? 1.0 : 0.4)
-                            .rotationEffect(.degrees(uiRotationAngle))
-                            .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
-                            .frame(width: 24, height: 24)
-                    }
-                }
             }
+        }
+        .rotationEffect(.degrees(uiRotationAngle))
+        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+    }
+
+    private var topSettingsBar: some View {
+        HStack(spacing: 8) {
+            qualityDropdownPill
+            dividerLine
+            recordingStatusPill
+            dividerLine
+            audioVUMeterPill
+            dividerLine
+            topTogglesGroup
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
