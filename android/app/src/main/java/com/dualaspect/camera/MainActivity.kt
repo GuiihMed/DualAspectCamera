@@ -92,11 +92,13 @@ class MainActivity : AppCompatActivity() {
                 allowFileAccess = true
                 databaseEnabled = true
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                cacheMode = WebSettings.LOAD_DEFAULT
+                cacheMode = WebSettings.LOAD_NO_CACHE
                 useWideViewPort = true
                 loadWithOverviewMode = true
                 setSupportZoom(false)
             }
+
+            clearCache(true)
 
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
@@ -128,8 +130,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        setupImmersiveMode()
+        webView.postDelayed({
+            setupImmersiveMode()
+            webView.evaluateJavascript(
+                "if (typeof renderCropGuides === 'function') renderCropGuides(window.innerWidth > window.innerHeight);",
+                null
+            )
+        }, 150)
+    }
+
     private fun loadApp() {
-        webView.loadUrl("https://guiihmed.github.io/DualAspectCamera/")
+        val timestamp = System.currentTimeMillis()
+        webView.loadUrl("https://guiihmed.github.io/DualAspectCamera/?v=$timestamp")
     }
 
     private fun hasRequiredPermissions(): Boolean {
