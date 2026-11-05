@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.json">
+  <title>DualAspect Camera Pro</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      overflow: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .rotate-smooth {
+      transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+    .crop-border-dashed {
+      border-style: dashed;
+      border-width: 1px;
+    }
+  </style>
+</head>
+<body class="bg-black text-white h-screen w-screen relative overflow-hidden select-none">
+
+  <!-- FEED REAL DA CÂMERA -->
+  <video id="cameraFeed" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover z-0"></video>
+
+  <!-- OVERLAY DE GUIAS ADAPTATIVAS (16:9 + 9:16) -->
+  <div id="cropGuidesContainer" class="absolute inset-0 pointer-events-none z-10 flex flex-col items-center justify-center">
+    <!-- Será atualizado via JS dependendo da orientação -->
+  </div>
+
+  <!-- SLIDER LATERAL DE EXPOSIÇÃO ULTRA-FINO (2px) -->
+  <div id="exposureContainer" class="absolute right-4 top-1/2 -translate-y-1/2 z-30 flex items-center py-6 px-2 cursor-pointer pointer-events-auto">
+    <div class="relative h-40 flex items-center justify-center">
+      <div id="exposureTrack" class="w-[2px] bg-white opacity-10 rounded-full h-full transition-all duration-300"></div>
+      <div id="exposureThumb" class="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 p-1.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 opacity-30 scale-75 transition-all">
+        <i data-lucide="sun" class="w-3 h-3 text-white rotate-smooth icon-rotate"></i>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAINEL SUPERIOR CONSOLIDADO (DROPDOWN, VU METER, TOGGLES) -->
+  <header class="absolute top-4 inset-x-0 mx-auto w-fit z-30 pointer-events-auto">
+    <div class="flex items-center gap-3 px-3.5 py-1.5 rounded-full bg-white/[0.05] backdrop-blur-2xl border border-white/10 shadow-2xl">
+      <button class="flex items-center gap-1.5 text-[10px] font-mono font-medium tracking-tight text-white/90">
+        <span class="rotate-smooth icon-rotate">4K UHD · 30FPS</span>
+        <i data-lucide="chevron-down" class="w-3 h-3 opacity-60 rotate-smooth icon-rotate"></i>
+      </button>
+
+      <div class="w-[1px] h-3 bg-white/15"></div>
+
+      <div id="statusBadge" class="flex items-center gap-1 text-[10px] font-mono text-white/70">
+        <span class="rotate-smooth icon-rotate">DUAL 16:9 + 9:16</span>
+      </div>
+
+      <div class="w-[1px] h-3 bg-white/15"></div>
+
+      <!-- Microfone & VU Meter Real -->
+      <div class="flex items-center gap-1.5">
+        <i data-lucide="mic" class="w-3 h-3 text-white/80 rotate-smooth icon-rotate"></i>
+        <div class="flex items-end gap-[1.5px] h-2.5 w-2.5">
+          <div id="vu1" class="w-[2px] bg-white rounded-full h-[33%] opacity-100 transition-all duration-75"></div>
+          <div id="vu2" class="w-[2px] bg-white rounded-full h-[66%] opacity-30 transition-all duration-75"></div>
+          <div id="vu3" class="w-[2px] bg-white rounded-full h-[100%] opacity-30 transition-all duration-75"></div>
+        </div>
+      </div>
+
+      <div class="w-[1px] h-3 bg-white/15"></div>
+
+      <!-- Toggles: Grade e Lanterna -->
+      <div class="flex items-center gap-2">
+        <button id="btnGrid" class="p-1 rounded-full text-white opacity-100 hover:opacity-100 transition-opacity">
+          <i data-lucide="grid-3x3" class="w-3 h-3 rotate-smooth icon-rotate"></i>
+        </button>
+        <button id="btnTorch" class="p-1 rounded-full text-white opacity-40 hover:opacity-100 transition-opacity">
+          <i data-lucide="flashlight" class="w-3 h-3 rotate-smooth icon-rotate"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- PÍLULA DE ZOOM DISCRETA (POLEGAR INFERIOR ESQUERDO) -->
+  <aside class="absolute bottom-24 left-6 z-30 pointer-events-auto">
+    <div class="flex items-center rounded-full bg-white/[0.05] backdrop-blur-2xl border border-white/10 p-1 shadow-2xl transition-all">
+      <button id="btnZoomToggle" class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+        <span id="zoomLabel" class="font-mono text-[10px] font-semibold text-white rotate-smooth icon-rotate">1.0×</span>
+      </button>
+
+      <div id="zoomPresets" class="flex items-center gap-1 max-w-0 opacity-0 overflow-hidden transition-all duration-300">
+        <button data-zoom="0.5" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">
+          <span class="rotate-smooth icon-rotate">.5</span>
+        </button>
+        <button data-zoom="1.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] bg-white text-black font-bold flex items-center justify-center">
+          <span class="rotate-smooth icon-rotate">1</span>
+        </button>
+        <button data-zoom="2.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">
+          <span class="rotate-smooth icon-rotate">2</span>
+        </button>
+        <button data-zoom="3.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">
+          <span class="rotate-smooth icon-rotate">3</span>
+        </button>
+        <button data-zoom="5.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">
+          <span class="rotate-smooth icon-rotate">5</span>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- CONTROLO PRINCIPAL (CARROSSEL, SHUTTER REC, FOTO RÁPIDA, GALERIA) -->
+  <footer class="absolute bottom-6 inset-x-0 z-30 flex flex-col items-center gap-4 pointer-events-auto">
+    <!-- Carrossel de Modos -->
+    <nav class="flex items-center gap-6">
+      <button class="mode-btn flex flex-col items-center gap-1 text-white/40 font-mono text-[11px] tracking-widest uppercase" data-mode="FOTO">
+        <span class="rotate-smooth icon-rotate">FOTO</span>
+        <div class="w-1 h-1 rounded-full bg-transparent"></div>
+      </button>
+      <button class="mode-btn flex flex-col items-center gap-1 text-white font-bold font-mono text-[11px] tracking-widest uppercase" data-mode="VÍDEO">
+        <span class="rotate-smooth icon-rotate">VÍDEO</span>
+        <div class="w-1 h-1 rounded-full bg-white"></div>
+      </button>
+      <button class="mode-btn flex flex-col items-center gap-1 text-white/40 font-mono text-[11px] tracking-widest uppercase" data-mode="CINE">
+        <span class="rotate-smooth icon-rotate">CINE</span>
+        <div class="w-1 h-1 rounded-full bg-transparent"></div>
+      </button>
+    </nav>
+
+    <!-- Tríade de Captura -->
+    <div class="w-full max-w-xs px-6 flex items-center justify-between">
+      <!-- Miniatura Galeria -->
+      <button class="w-11 h-11 rounded-xl bg-white/[0.06] backdrop-blur-xl border border-white/20 p-0.5 flex items-center justify-center hover:opacity-80 active:scale-95 transition-all">
+        <div class="w-full h-full rounded-[10px] bg-neutral-900 flex items-center justify-center">
+          <i data-lucide="image" class="w-4 h-4 text-white/70 rotate-smooth icon-rotate"></i>
+        </div>
+      </button>
+
+      <!-- Botão REC Central -->
+      <div class="flex flex-col items-center gap-1">
+        <button id="shutterBtn" class="relative w-18 h-18 rounded-full border-2 border-white/80 p-1 flex items-center justify-center active:scale-95 transition-all">
+          <div id="shutterCore" class="w-14 h-14 rounded-full bg-white transition-all duration-300"></div>
+        </button>
+        <span id="timecodeDisplay" class="font-mono text-[9px] font-bold text-white tracking-widest hidden rotate-smooth icon-rotate">00:00</span>
+      </div>
+
+      <!-- Botão Foto Rápida -->
+      <button id="btnQuickPhoto" class="w-11 h-11 rounded-full bg-white/[0.06] backdrop-blur-xl border border-white/20 flex items-center justify-center hover:bg-white/10 active:scale-90 transition-all">
+        <i data-lucide="camera" class="w-4 h-4 text-white rotate-smooth icon-rotate"></i>
+      </button>
+    </div>
+  </footer>
+
+  <script>
+    // 1. Inicializar Ícones Lucide
+    lucide.createIcons();
+
+    // 2. Acesso à Câmera Traseira Real (Chrome Android & Safari iOS)
+    const video = document.getElementById('cameraFeed');
+    let videoStream = null;
+    let audioContext = null;
+    let analyser = null;
+
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 3840 },
+            height: { ideal: 2160 }
+          },
+          audio: true
+        });
+        video.srcObject = stream;
+        videoStream = stream;
+        initAudioVU(stream);
+      } catch (err) {
+        console.warn('Câmera ambiente não disponível, tentando fallback:', err);
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          video.srcObject = stream;
+          videoStream = stream;
+          initAudioVU(stream);
+        } catch (e) {
+          console.error('Permissão de câmera recusada:', e);
+        }
+      }
+    }
+
+    // 3. Medidor VU de Áudio Dinâmico
+    function initAudioVU(stream) {
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(stream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 64;
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const vu1 = document.getElementById('vu1');
+        const vu2 = document.getElementById('vu2');
+        const vu3 = document.getElementById('vu3');
+
+        function updateVU() {
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+          const avg = sum / dataArray.length / 255;
+
+          vu1.style.opacity = avg > 0.05 ? '1' : '0.3';
+          vu2.style.opacity = avg > 0.25 ? '1' : '0.3';
+          vu3.style.opacity = avg > 0.55 ? '1' : '0.3';
+          requestAnimationFrame(updateVU);
+        }
+        updateVU();
+      } catch (e) {
+        console.warn('Web Audio indisponível:', e);
+      }
+    }
+
+    // 4. Rotação Fluida de Eixo (Decoupled Node Rotation)
+    let currentAngle = 0;
+    function updateOrientation() {
+      const isLandscape = window.innerWidth > window.innerHeight;
+      let angle = 0;
+
+      if (screen.orientation && screen.orientation.type) {
+        if (screen.orientation.type.includes('landscape-primary')) angle = 90;
+        else if (screen.orientation.type.includes('landscape-secondary')) angle = -90;
+        else angle = 0;
+      } else if (typeof window.orientation !== 'undefined') {
+        angle = window.orientation === 90 ? 90 : (window.orientation === -90 ? -90 : 0);
+      } else {
+        angle = isLandscape ? 90 : 0;
+      }
+      currentAngle = angle;
+
+      document.querySelectorAll('.icon-rotate').forEach(el => {
+        el.style.transform = `rotate(${angle}deg)`;
+      });
+
+      renderCropGuides(isLandscape);
+    }
+
+    window.addEventListener('resize', updateOrientation);
+    window.addEventListener('orientationchange', updateOrientation);
+    if (screen.orientation) screen.orientation.addEventListener('change', updateOrientation);
+
+    // 5. Renderização das Guias de Corte Adaptativas
+    let showGrid = true;
+    function renderCropGuides(isLandscape) {
+      const container = document.getElementById('cropGuidesContainer');
+      if (isLandscape) {
+        // Landscape: 16:9 full; corte 9:16 vertical no meio com 30% dimming nas laterais
+        container.innerHTML = `
+          <div class="w-full h-full flex items-center justify-center">
+            <div class="h-full flex-1 bg-black/30 backdrop-blur-[0.5px]"></div>
+            <div class="relative h-full aspect-[9/16] border-x border-white/30 crop-border-dashed flex items-center justify-center">
+              ${renderCornerBrackets()}
+              ${renderReticle()}
+              ${showGrid ? renderGrid() : ''}
+              <span class="absolute top-4 px-2 py-0.5 rounded-full bg-white/[0.08] backdrop-blur-md border border-white/10 text-[9px] font-mono tracking-widest text-white/70">
+                9:16 SAFE ZONE
+              </span>
+            </div>
+            <div class="h-full flex-1 bg-black/30 backdrop-blur-[0.5px]"></div>
+          </div>
+        `;
+      } else {
+        // Portrait: 9:16 vertical; corte 16:9 horizontal no meio com 30% dimming topo/base
+        container.innerHTML = `
+          <div class="w-full h-full flex flex-col items-center justify-center">
+            <div class="w-full flex-1 bg-black/30 backdrop-blur-[0.5px]"></div>
+            <div class="relative w-full aspect-[16/9] border-y border-white/30 crop-border-dashed flex items-center justify-center">
+              ${renderCornerBrackets()}
+              ${renderReticle()}
+              ${showGrid ? renderGrid() : ''}
+              <span class="absolute top-2 left-4 px-2 py-0.5 rounded-full bg-white/[0.08] backdrop-blur-md border border-white/10 text-[9px] font-mono tracking-widest text-white/70">
+                16:9 CROP
+              </span>
+            </div>
+            <div class="w-full flex-1 bg-black/30 backdrop-blur-[0.5px]"></div>
+          </div>
+        `;
+      }
+      lucide.createIcons();
+    }
+
+    function renderCornerBrackets() {
+      return `
+        <div class="absolute top-3 left-3 w-3 h-3 border-t-2 border-l-2 border-white/70 pointer-events-none"></div>
+        <div class="absolute top-3 right-3 w-3 h-3 border-t-2 border-r-2 border-white/70 pointer-events-none"></div>
+        <div class="absolute bottom-3 left-3 w-3 h-3 border-b-2 border-l-2 border-white/70 pointer-events-none"></div>
+        <div class="absolute bottom-3 right-3 w-3 h-3 border-b-2 border-r-2 border-white/70 pointer-events-none"></div>
+      `;
+    }
+
+    function renderReticle() {
+      return `
+        <div class="relative w-4 h-4 opacity-40 pointer-events-none">
+          <div class="absolute top-1/2 left-0 w-1.5 h-[1px] bg-white -translate-y-1/2"></div>
+          <div class="absolute top-1/2 right-0 w-1.5 h-[1px] bg-white -translate-y-1/2"></div>
+          <div class="absolute top-0 left-1/2 h-1.5 w-[1px] bg-white -translate-x-1/2"></div>
+          <div class="absolute bottom-0 left-1/2 h-1.5 w-[1px] bg-white -translate-x-1/2"></div>
+        </div>
+      `;
+    }
+
+    function renderGrid() {
+      return `
+        <div class="absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-20 pointer-events-none">
+          <div class="border-r border-b border-white/40 border-dashed"></div>
+          <div class="border-r border-b border-white/40 border-dashed"></div>
+          <div class="border-b border-white/40 border-dashed"></div>
+          <div class="border-r border-b border-white/40 border-dashed"></div>
+          <div class="border-r border-b border-white/40 border-dashed"></div>
+          <div class="border-b border-white/40 border-dashed"></div>
+          <div class="border-r border-b border-white/40 border-dashed"></div>
+          <div class="border-r border-b border-white/40 border-dashed"></div>
+          <div></div>
+        </div>
+      `;
+    }
+
+    // 6. Gravação Real & Shutter
+    let isRecording = false;
+    let recSeconds = 0;
+    let recTimer = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+
+    const shutterBtn = document.getElementById('shutterBtn');
+    const shutterCore = document.getElementById('shutterCore');
+    const timecodeDisplay = document.getElementById('timecodeDisplay');
+
+    shutterBtn.addEventListener('click', () => {
+      isRecording = !isRecording;
+      if (isRecording) {
+        // Iniciar Gravação
+        shutterCore.className = 'w-7 h-7 rounded-[6px] bg-white transition-all duration-300';
+        timecodeDisplay.classList.remove('hidden');
+        recSeconds = 0;
+        timecodeDisplay.innerText = '00:00';
+        recTimer = setInterval(() => {
+          recSeconds++;
+          const m = Math.floor(recSeconds / 60).toString().padStart(2, '0');
+          const s = (recSeconds % 60).toString().padStart(2, '0');
+          timecodeDisplay.innerText = `${m}:${s}`;
+        }, 1000);
+
+        if (videoStream) {
+          recordedChunks = [];
+          mediaRecorder = new MediaRecorder(videoStream, { mimeType: 'video/webm;codecs=vp8,opus' });
+          mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+          mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `DualCam_Recording_${Date.now()}.webm`;
+            a.click();
+          };
+          mediaRecorder.start();
+        }
+      } else {
+        // Parar Gravação e Salvar
+        shutterCore.className = 'w-14 h-14 rounded-full bg-white transition-all duration-300';
+        timecodeDisplay.classList.add('hidden');
+        clearInterval(recTimer);
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+      }
+    });
+
+    // 7. Zoom Expansível
+    const btnZoomToggle = document.getElementById('btnZoomToggle');
+    const zoomPresets = document.getElementById('zoomPresets');
+    const zoomLabel = document.getElementById('zoomLabel');
+    let isZoomExpanded = false;
+
+    btnZoomToggle.addEventListener('click', () => {
+      isZoomExpanded = !isZoomExpanded;
+      if (isZoomExpanded) {
+        zoomPresets.classList.remove('max-w-0', 'opacity-0');
+        zoomPresets.classList.add('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
+      } else {
+        zoomPresets.classList.remove('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
+        zoomPresets.classList.add('max-w-0', 'opacity-0');
+      }
+    });
+
+    document.querySelectorAll('.zoom-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const factor = btn.getAttribute('data-zoom');
+        zoomLabel.innerText = `${factor}×`;
+        document.querySelectorAll('.zoom-btn').forEach(b => {
+          b.className = 'zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center';
+        });
+        btn.className = 'zoom-btn w-6 h-6 rounded-full font-mono text-[9px] bg-white text-black font-bold flex items-center justify-center';
+        zoomPresets.classList.remove('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
+        zoomPresets.classList.add('max-w-0', 'opacity-0');
+        isZoomExpanded = false;
+      });
+    });
+
+    // 8. Toggles de Grade e Lanterna
+    document.getElementById('btnGrid').addEventListener('click', () => {
+      showGrid = !showGrid;
+      renderCropGuides(window.innerWidth > window.innerHeight);
+    });
+
+    let torchOn = false;
+    document.getElementById('btnTorch').addEventListener('click', async () => {
+      if (!videoStream) return;
+      const track = videoStream.getVideoTracks()[0];
+      try {
+        torchOn = !torchOn;
+        await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+        document.getElementById('btnTorch').style.opacity = torchOn ? '1' : '0.4';
+      } catch (e) {
+        console.warn('Lanterna de hardware não suportada pelo browser:', e);
+      }
+    });
+
+    // 9. Slider de Exposição Interativo
+    const expContainer = document.getElementById('exposureContainer');
+    const expTrack = document.getElementById('exposureTrack');
+    const expThumb = document.getElementById('exposureThumb');
+
+    expContainer.addEventListener('pointerdown', () => {
+      expTrack.className = 'w-[4px] bg-white opacity-90 rounded-full h-full shadow-[0_0_10px_rgba(255,255,255,0.7)] transition-all';
+      expThumb.className = 'absolute top-1/2 -translate-x-1/2 -translate-y-1/2 p-1.5 rounded-full bg-white/20 backdrop-blur-xl border border-white/40 opacity-100 scale-100 transition-all';
+    });
+
+    window.addEventListener('pointerup', () => {
+      expTrack.className = 'w-[2px] bg-white opacity-10 rounded-full h-full transition-all duration-300';
+      expThumb.className = 'absolute top-1/2 -translate-x-1/2 -translate-y-1/2 p-1.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 opacity-30 scale-75 transition-all';
+    });
+
+    // Iniciar tudo
+    initCamera();
+    updateOrientation();
+  </script>
+</body>
+</html>
