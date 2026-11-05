@@ -328,6 +328,10 @@ struct CameraView: View {
     @State private var pinchStartZoom: CGFloat?
     @State private var showGrid: Bool = true
     @State private var isZoomExpanded: Bool = false
+    @State private var isScrubbingZoom: Bool = false
+    @State private var scrubStartZoom: CGFloat = 1.0
+    @State private var lastHapticStep: Int = 10
+    @State private var autoDismissZoomWorkItem: DispatchWorkItem?
     @State private var isPulseAnimating: Bool = false
     @State private var simulatedAudioLevel: CGFloat = 0.5
     @State private var exposureValue: CGFloat = 0.5
@@ -420,13 +424,13 @@ struct CameraView: View {
 
             Spacer()
 
-            // Floating Zoom Pill
+            // Interactive Tactile Zoom Dial (Centered above mode carousel)
             HStack {
-                floatingZoomControl
-                    .padding(.leading, max(16, safeInsets.leading))
-                    .padding(.bottom, 12)
+                Spacer()
+                interactiveZoomControl
                 Spacer()
             }
+            .padding(.bottom, 12)
 
             // Bottom Control Dock
             bottomControlDock
@@ -438,11 +442,11 @@ struct CameraView: View {
 
     private func landscapeLayout(proxy: GeometryProxy, safeInsets: EdgeInsets) -> some View {
         HStack(spacing: 0) {
-            // Left Zone: Zoom Control + Safe Margins
+            // Left Zone: Interactive Zoom Control
             VStack {
                 Spacer()
-                floatingZoomControl
-                    .padding(.leading, max(20, safeInsets.leading))
+                interactiveZoomControl
+                    .padding(.leading, max(24, safeInsets.leading))
                     .padding(.bottom, max(16, safeInsets.bottom))
             }
 
@@ -707,54 +711,114 @@ struct CameraView: View {
         .frame(height: 180)
     }
 
-    // MARK: - Floating Expanding Zoom Control (0.5x Ultra-Wide to 5x)
+    // MARK: - Interactive Tactile Zoom Dial & Precision Wheel
 
-    private var floatingZoomControl: some View {
-        HStack(spacing: 4) {
-            Button {
-                hapticFeedback(.light)
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.75)) {
-                    isZoomExpanded.toggle()
-                }
-            } label: {
-                Text(String(format: "%.1f×", cameraManager.zoomFactor))
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.12), in: Circle())
-            }
+    private var interactiveZoomControl: some View {
+        VStack(spacing: 6) {
+            // Precision Zoom Readout & Tick Ruler (Appears during drag/scrub)
+            if isScrubbingZoom {
+                VStack(spacing: 3) {
+                    Text(String(format: "%.1f×", cameraManager.zoomFactor))
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 3)
+                        .background(Color.black.opacity(0.8), in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.3), lineWidth: 0.8))
 
-            if isZoomExpanded {
-                HStack(spacing: 3) {
-                    let presets: [CGFloat] = cameraManager.isUltraWideAvailable ? [0.5, 1.0, 2.0, 3.0, 5.0] : [1.0, 2.0, 3.0, 5.0]
-                    ForEach(presets, id: \.self) { preset in
-                        let isSelected = abs(cameraManager.zoomFactor - preset) < 0.15
-                        Button {
-                            hapticFeedback(.light)
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) {
-                                cameraManager.setZoomFactor(preset)
-                                isZoomExpanded = false
-                            }
-                        } label: {
-                            Text(preset == 0.5 ? ".5" : String(format: "%.0f", preset))
-                                .font(.system(size: 10, weight: isSelected ? .bold : .medium, design: .monospaced))
-                                .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.8))
-                                .frame(width: 28, height: 28)
-                                .background(isSelected ? Color.white : Color.clear, in: Circle())
+                    // Precision Tick Marks Ruler
+                    HStack(spacing: 4) {
+                        ForEach(-6...6, id: \.self) { i in
+                            let isMajor = (i % 3 == 0)
+                            Rectangle()
+                                .fill(i == 0 ? Color.white : Color.white.opacity(isMajor ? 0.6 : 0.2))
+                                .frame(width: i == 0 ? 2 : 1, height: isMajor ? 12 : 6)
                         }
                     }
+                    .frame(height: 14)
                 }
-                .padding(.horizontal, 4)
-                .transition(.scale(scale: 0.8, anchor: .leading).combined(with: .opacity))
+                .transition(.scale(scale: 0.85).combined(with: .opacity))
             }
+
+            // Lens Selector Pill: [.5] [1] [2] [3] [5]
+            HStack(spacing: 3) {
+                let presets: [CGFloat] = cameraManager.isUltraWideAvailable ? [0.5, 1.0, 2.0, 3.0, 5.0] : [1.0, 2.0, 3.0, 5.0]
+                ForEach(presets, id: \.self) { preset in
+                    let isClose = abs(cameraManager.zoomFactor - preset) < 0.15
+                    Button {
+                        hapticFeedback(.light)
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) {
+                            cameraManager.setZoomFactor(preset)
+                        }
+                    } label: {
+                        Text(preset == 0.5 ? ".5" : String(format: "%.0f", preset))
+                            .font(.system(size: 11, weight: isClose ? .bold : .medium, design: .monospaced))
+                            .foregroundStyle(isClose ? Color.black : Color.white.opacity(0.85))
+                            .frame(width: 30, height: 30)
+                            .background(
+                                isClose ? Color.white : Color.white.opacity(0.08),
+                                in: Circle()
+                            )
+                            .overlay(
+                                Circle().strokeBorder(isClose ? Color.clear : Color.white.opacity(0.12), lineWidth: 0.6)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                // If currently at an in-between zoom level (e.g. 1.4x), show fine indicator pill
+                let isPreset = [0.5, 1.0, 2.0, 3.0, 5.0].contains { abs(cameraManager.zoomFactor - $0) < 0.15 }
+                if !isPreset {
+                    Text(String(format: "%.1f×", cameraManager.zoomFactor))
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.black)
+                        .padding(.horizontal, 7)
+                        .frame(height: 30)
+                        .background(Color.white, in: Capsule())
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .padding(3)
+            .background(
+                Color.white.opacity(0.06)
+                    .background(.ultraThinMaterial)
+            )
+            .clipShape(Capsule())
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
+            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 3)
+            .gesture(
+                DragGesture(minimumDistance: 3)
+                    .onChanged { value in
+                        if !isScrubbingZoom {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                isScrubbingZoom = true
+                            }
+                            scrubStartZoom = cameraManager.zoomFactor
+                        }
+                        autoDismissZoomWorkItem?.cancel()
+
+                        let delta = (value.translation.width / 110.0)
+                        let speedMultiplier: CGFloat = scrubStartZoom > 3.0 ? 3.0 : (scrubStartZoom > 1.5 ? 2.0 : 1.2)
+                        let newZoom = min(max(scrubStartZoom + (delta * speedMultiplier), 0.5), 10.0)
+                        cameraManager.setZoomFactor(newZoom)
+
+                        let stepInt = Int(newZoom * 5.0)
+                        if stepInt != lastHapticStep {
+                            lastHapticStep = stepInt
+                            hapticFeedbackSelection()
+                        }
+                    }
+                    .onEnded { _ in
+                        let item = DispatchWorkItem {
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                isScrubbingZoom = false
+                            }
+                        }
+                        autoDismissZoomWorkItem = item
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: item)
+                    }
+            )
         }
-        .padding(3)
-        .background(
-            Color.white.opacity(0.06)
-                .background(.ultraThinMaterial)
-        )
-        .clipShape(Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
         .environment(\.colorScheme, .dark)
     }
 
@@ -967,5 +1031,11 @@ struct CameraView: View {
         let generator = UIImpactFeedbackGenerator(style: style)
         generator.prepare()
         generator.impactOccurred()
+    }
+
+    private func hapticFeedbackSelection() {
+        let generator = UISelectionFeedbackGenerator()
+        generator.prepare()
+        generator.selectionChanged()
     }
 }

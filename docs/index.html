@@ -112,20 +112,29 @@
     </div>
   </header>
 
-  <!-- PÍLULA DE ZOOM DISCRETA (0.5x Ultra-Wide a 5x) -->
-  <aside class="absolute bottom-24 left-6 z-30 pointer-events-auto">
-    <div class="flex items-center rounded-full bg-white/[0.06] backdrop-blur-2xl border border-white/10 p-1 shadow-2xl transition-all">
-      <button id="btnZoomToggle" class="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
-        <span id="zoomLabel" class="font-mono text-[10px] font-semibold text-white">1.0×</span>
-      </button>
-
-      <div id="zoomPresets" class="flex items-center gap-1 max-w-0 opacity-0 overflow-hidden transition-all duration-300">
-        <button data-zoom="0.5" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">.5</button>
-        <button data-zoom="1.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] bg-white text-black font-bold flex items-center justify-center">1</button>
-        <button data-zoom="2.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">2</button>
-        <button data-zoom="3.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">3</button>
-        <button data-zoom="5.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">5</button>
+  <!-- DISCADOR DE ZOOM INTERATIVO (0.5x Ultra-Wide a 5x com régua de precisão) -->
+  <aside class="absolute bottom-24 inset-x-0 mx-auto w-fit z-30 pointer-events-auto flex flex-col items-center gap-1.5 touch-none">
+    <!-- Régua / Indicador Flutuante ao Arrastar -->
+    <div id="zoomRulerContainer" class="opacity-0 transition-opacity duration-200 flex flex-col items-center gap-1 pointer-events-none">
+      <div id="zoomFloatLabel" class="font-mono text-[13px] font-bold px-2.5 py-0.5 rounded-full bg-black/80 border border-white/20 text-white">1.0×</div>
+      <div class="flex items-center gap-1 h-3 opacity-60">
+        <div class="w-[1px] h-2 bg-white/40"></div>
+        <div class="w-[1px] h-3 bg-white"></div>
+        <div class="w-[1px] h-2 bg-white/40"></div>
+        <div class="w-[1px] h-4 bg-white"></div>
+        <div class="w-[1px] h-2 bg-white/40"></div>
+        <div class="w-[1px] h-3 bg-white"></div>
+        <div class="w-[1px] h-2 bg-white/40"></div>
       </div>
+    </div>
+
+    <!-- Pílula de Lentes [.5] [1] [2] [3] [5] -->
+    <div id="zoomDialPill" class="flex items-center gap-1 rounded-full bg-white/[0.08] backdrop-blur-2xl border border-white/12 p-1 shadow-2xl">
+      <button data-zoom="0.5" class="zoom-btn w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">.5</button>
+      <button data-zoom="1.0" class="zoom-btn w-7 h-7 rounded-full font-mono text-[10px] bg-white text-black font-bold flex items-center justify-center transition-all">1</button>
+      <button data-zoom="2.0" class="zoom-btn w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">2</button>
+      <button data-zoom="3.0" class="zoom-btn w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">3</button>
+      <button data-zoom="5.0" class="zoom-btn w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all">5</button>
     </div>
   </aside>
 
@@ -304,48 +313,72 @@
       applyExposure(normalized);
     }
 
-    // 4. Zoom 0.5x a 5x
+    // 4. Zoom Interativo (Lentes .5, 1, 2, 3, 5 + Scrubbing de Precisão)
+    const zoomFloatLabel = document.getElementById('zoomFloatLabel');
+    const zoomRulerContainer = document.getElementById('zoomRulerContainer');
+    const zoomDialPill = document.getElementById('zoomDialPill');
+    let zoomDismissTimer = null;
+
     function applyZoom(factor) {
-      zoomLevel = factor;
-      document.getElementById('zoomLabel').innerText = `${factor}×`;
+      zoomLevel = parseFloat(factor.toFixed(1));
+      zoomFloatLabel.innerText = `${zoomLevel}×`;
+
       if (videoStream) {
         const track = videoStream.getVideoTracks()[0];
         const caps = track.getCapabilities ? track.getCapabilities() : {};
         if (caps.zoom) {
-          track.applyConstraints({ advanced: [{ zoom: factor }] }).catch(() => {});
+          track.applyConstraints({ advanced: [{ zoom: zoomLevel }] }).catch(() => {});
         } else {
-          video.style.transform = `scale(${Math.max(0.7, factor)})`;
+          video.style.transform = `scale(${Math.max(0.7, zoomLevel)})`;
         }
       }
+
+      // Atualizar destaque dos botões
+      document.querySelectorAll('.zoom-btn').forEach(btn => {
+        const val = parseFloat(btn.getAttribute('data-zoom'));
+        if (Math.abs(val - zoomLevel) < 0.15) {
+          btn.className = 'zoom-btn w-7 h-7 rounded-full font-mono text-[10px] bg-white text-black font-bold flex items-center justify-center transition-all scale-105';
+        } else {
+          btn.className = 'zoom-btn w-7 h-7 rounded-full font-mono text-[10px] text-white/80 hover:text-white flex items-center justify-center transition-all';
+        }
+      });
     }
 
-    const btnZoomToggle = document.getElementById('btnZoomToggle');
-    const zoomPresets = document.getElementById('zoomPresets');
-    let isZoomExpanded = false;
-
-    btnZoomToggle.addEventListener('click', () => {
-      isZoomExpanded = !isZoomExpanded;
-      if (isZoomExpanded) {
-        zoomPresets.classList.remove('max-w-0', 'opacity-0');
-        zoomPresets.classList.add('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
-      } else {
-        zoomPresets.classList.remove('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
-        zoomPresets.classList.add('max-w-0', 'opacity-0');
-      }
-    });
-
     document.querySelectorAll('.zoom-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const z = parseFloat(btn.getAttribute('data-zoom'));
         applyZoom(z);
-        document.querySelectorAll('.zoom-btn').forEach(b => {
-          b.className = 'zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center';
-        });
-        btn.className = 'zoom-btn w-6 h-6 rounded-full font-mono text-[9px] bg-white text-black font-bold flex items-center justify-center';
-        zoomPresets.classList.remove('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
-        zoomPresets.classList.add('max-w-0', 'opacity-0');
-        isZoomExpanded = false;
       });
+    });
+
+    // Arrastar sobre o dial para zoom contínuo de precisão
+    let isScrubbingDial = false;
+    let scrubStartX = 0;
+    let scrubStartZoom = 1.0;
+
+    zoomDialPill.addEventListener('pointerdown', (e) => {
+      isScrubbingDial = true;
+      scrubStartX = e.clientX;
+      scrubStartZoom = zoomLevel;
+      zoomRulerContainer.style.opacity = '1';
+      clearTimeout(zoomDismissTimer);
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!isScrubbingDial) return;
+      const deltaX = e.clientX - scrubStartX;
+      const speed = scrubStartZoom > 3 ? 0.04 : (scrubStartZoom > 1.5 ? 0.025 : 0.015);
+      let target = Math.min(Math.max(scrubStartZoom + (deltaX * speed), 0.5), 10.0);
+      applyZoom(target);
+    });
+
+    window.addEventListener('pointerup', () => {
+      if (!isScrubbingDial) return;
+      isScrubbingDial = false;
+      zoomDismissTimer = setTimeout(() => {
+        zoomRulerContainer.style.opacity = '0';
+      }, 1200);
     });
 
     // 5. Trocar Câmera (Front/Back)
