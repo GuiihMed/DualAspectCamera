@@ -15,7 +15,7 @@ struct CameraPreviewView: UIViewRepresentable {
         view.onOrientationChange = { [weak cameraManager] orientation in
             cameraManager?.updateInterfaceOrientation(orientation)
             if let connection = view.previewLayer.connection {
-                cameraManager?.applyLandscapeRotation(to: connection, interfaceOrientation: orientation)
+                cameraManager?.applyRotation(to: connection, interfaceOrientation: orientation)
             }
         }
         return view
@@ -25,7 +25,7 @@ struct CameraPreviewView: UIViewRepresentable {
         if uiView.previewLayer.session !== cameraManager.session {
             uiView.previewLayer.session = cameraManager.session
         }
-        uiView.enforceHorizontalOrientation()
+        uiView.enforceOrientation()
     }
 }
 
@@ -42,21 +42,31 @@ final class PreviewContainerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        enforceHorizontalOrientation()
+        enforceOrientation()
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        enforceHorizontalOrientation()
+        enforceOrientation()
     }
 
-    func enforceHorizontalOrientation() {
+    func enforceOrientation() {
         guard let connection = previewLayer.connection else { return }
 
-        // Default strictly to Landscape (Horizontal 16:9 feed)
-        let orientation = window?.windowScene?.interfaceOrientation ?? .landscapeRight
-        let effectiveOrientation: UIInterfaceOrientation = (orientation == .landscapeLeft) ? .landscapeLeft : .landscapeRight
-        let angle: CGFloat = (effectiveOrientation == .landscapeLeft) ? 180.0 : 0.0
+        let orientation = window?.windowScene?.interfaceOrientation ?? .portrait
+        let angle: CGFloat
+        switch orientation {
+        case .portrait:
+            angle = 90.0
+        case .portraitUpsideDown:
+            angle = 270.0
+        case .landscapeLeft:
+            angle = 180.0
+        case .landscapeRight:
+            angle = 0.0
+        @unknown default:
+            angle = 90.0
+        }
 
         if #available(iOS 17.0, *) {
             if connection.isVideoRotationAngleSupported(angle) {
@@ -64,146 +74,167 @@ final class PreviewContainerView: UIView {
             }
         } else {
             if connection.isVideoOrientationSupported {
-                connection.videoOrientation = (effectiveOrientation == .landscapeLeft) ? .landscapeLeft : .landscapeRight
+                switch orientation {
+                case .portrait: connection.videoOrientation = .portrait
+                case .portraitUpsideDown: connection.videoOrientation = .portraitUpsideDown
+                case .landscapeLeft: connection.videoOrientation = .landscapeLeft
+                case .landscapeRight: connection.videoOrientation = .landscapeRight
+                default: connection.videoOrientation = .portrait
+                }
             }
         }
-        onOrientationChange?(effectiveOrientation)
+        onOrientationChange?(orientation)
     }
 }
 
-// MARK: - 9:16 Safe-Area Visual Framing Guide Overlay
+// MARK: - Adaptive Crop Guides (Landscape 16:9 & Portrait 9:16)
 
-/// Draws the full-screen camera preview with the exact centered 9:16 vertical crop guide,
-/// subtle non-obstructive lateral dimming, delicate dashed boundaries, corner brackets,
-/// and center optical reticle.
-struct FramingGuideOverlay: View {
+struct AdaptiveCropGuides: View {
+    let isLandscape: Bool
     let isRecording: Bool
     let showGrid: Bool
 
     var body: some View {
         GeometryReader { proxy in
             let screenSize = proxy.size
-            let containerRect = CGRect(origin: .zero, size: screenSize)
 
-            // Compute exact 16:9 feed layout with .resizeAspectFill (full screen edge-to-edge)
-            let videoRect = aspectFillRect(
-                aspectRatio: CGSize(width: 16, height: 9),
-                insideRect: containerRect
-            )
+            if isLandscape {
+                // LANDSCAPE: 16:9 full sensor feed with centered 9:16 vertical crop guide + lateral 30% dimming
+                let verticalCropWidth = screenSize.height * (9.0 / 16.0)
+                let verticalCropRect = CGRect(
+                    x: (screenSize.width - verticalCropWidth) / 2.0,
+                    y: 0,
+                    width: verticalCropWidth,
+                    height: screenSize.height
+                )
+                let lateralWidth = max(0, verticalCropRect.minX)
 
-            // Exact 9:16 vertical crop rectangle centered in the middle of the 16:9 feed
-            let verticalCropWidth = videoRect.height * (9.0 / 16.0)
-            let verticalCropRect = CGRect(
-                x: videoRect.midX - (verticalCropWidth / 2.0),
-                y: max(0, videoRect.minY),
-                width: verticalCropWidth,
-                height: min(screenSize.height, videoRect.height)
-            )
+                ZStack {
+                    // Lateral Dimming (30%)
+                    if lateralWidth > 0 {
+                        Rectangle()
+                            .fill(Color.black.opacity(0.30))
+                            .frame(width: lateralWidth, height: screenSize.height)
+                            .position(x: lateralWidth / 2.0, y: screenSize.height / 2.0)
 
-            let leftMaskWidth = max(0, verticalCropRect.minX)
-            let rightMaskWidth = max(0, screenSize.width - verticalCropRect.maxX)
+                        Rectangle()
+                            .fill(Color.black.opacity(0.30))
+                            .frame(width: lateralWidth, height: screenSize.height)
+                            .position(x: verticalCropRect.maxX + (lateralWidth / 2.0), y: screenSize.height / 2.0)
+                    }
 
-            ZStack {
-                // 1. Soft Lateral Dimming (Exterior 16:9 margins kept fully readable with subtle contrast)
-                if leftMaskWidth > 0 {
+                    // Centered 9:16 Frame
                     Rectangle()
-                        .fill(Color.black.opacity(0.20))
-                        .frame(width: leftMaskWidth, height: screenSize.height)
-                        .position(x: leftMaskWidth / 2.0, y: screenSize.height / 2.0)
-                }
-
-                if rightMaskWidth > 0 {
-                    Rectangle()
-                        .fill(Color.black.opacity(0.20))
-                        .frame(width: rightMaskWidth, height: screenSize.height)
-                        .position(x: verticalCropRect.maxX + (rightMaskWidth / 2.0), y: screenSize.height / 2.0)
-                }
-
-                // 2. Rule of Thirds Grid inside 9:16 vertical frame (when enabled)
-                if showGrid {
-                    ThirdsGridShape()
-                        .stroke(
-                            Color.white.opacity(0.18),
-                            style: StrokeStyle(lineWidth: 0.8, dash: [3, 4])
+                        .strokeBorder(
+                            Color.white.opacity(isRecording ? 0.75 : 0.35),
+                            style: StrokeStyle(lineWidth: 1.0, dash: [4, 4])
                         )
                         .frame(width: verticalCropRect.width, height: verticalCropRect.height)
                         .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
+
+                    // Corner Brackets
+                    CornerTicksShape(tickLength: 18)
+                        .stroke(
+                            Color.white.opacity(isRecording ? 0.95 : 0.7),
+                            style: StrokeStyle(lineWidth: 2.0, lineCap: .round)
+                        )
+                        .frame(width: verticalCropRect.width, height: verticalCropRect.height)
+                        .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
+
+                    // Reticle
+                    CenterReticleShape()
+                        .stroke(Color.white.opacity(0.55), lineWidth: 1.0)
+                        .frame(width: 20, height: 20)
+                        .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
+
+                    // Rule of Thirds
+                    if showGrid {
+                        ThirdsGridShape()
+                            .stroke(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 0.8, dash: [3, 4]))
+                            .frame(width: verticalCropRect.width, height: verticalCropRect.height)
+                            .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
+                    }
+
+                    // 9:16 Badge
+                    Text("9:16 SAFE ZONE")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.white.opacity(0.08), in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.7))
+                        .position(x: verticalCropRect.midX, y: verticalCropRect.minY + 24)
                 }
+            } else {
+                // PORTRAIT: 9:16 vertical full height with centered 16:9 crop guide + top/bottom 30% dimming
+                let horizontalCropHeight = screenSize.width * (9.0 / 16.0)
+                let horizontalCropRect = CGRect(
+                    x: 0,
+                    y: (screenSize.height - horizontalCropHeight) / 2.0,
+                    width: screenSize.width,
+                    height: horizontalCropHeight
+                )
+                let verticalMargin = max(0, horizontalCropRect.minY)
 
-                // 3. Precision Optical Reticle (Crosshair)
-                CenterReticleShape()
-                    .stroke(
-                        Color.white.opacity(0.55),
-                        lineWidth: 1.0
-                    )
-                    .frame(width: 20, height: 20)
-                    .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
+                ZStack {
+                    // Top & Bottom Dimming (30%)
+                    if verticalMargin > 0 {
+                        Rectangle()
+                            .fill(Color.black.opacity(0.30))
+                            .frame(width: screenSize.width, height: verticalMargin)
+                            .position(x: screenSize.width / 2.0, y: verticalMargin / 2.0)
 
-                // 4. Centered 9:16 Safe-Area Dashed Framing Lines
-                Rectangle()
-                    .strokeBorder(
-                        Color.white.opacity(isRecording ? 0.7 : 0.35),
-                        style: StrokeStyle(lineWidth: 1.0, dash: [4, 4])
-                    )
-                    .frame(width: verticalCropRect.width, height: verticalCropRect.height)
-                    .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
+                        Rectangle()
+                            .fill(Color.black.opacity(0.30))
+                            .frame(width: screenSize.width, height: verticalMargin)
+                            .position(x: screenSize.width / 2.0, y: horizontalCropRect.maxY + (verticalMargin / 2.0))
+                    }
 
-                // Corner ticks on the 9:16 frame for fast framing alignment
-                CornerTicksShape(tickLength: 18)
-                    .stroke(
-                        Color.white.opacity(isRecording ? 0.9 : 0.65),
-                        style: StrokeStyle(lineWidth: 2.0, lineCap: .round)
-                    )
-                    .frame(width: verticalCropRect.width, height: verticalCropRect.height)
-                    .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
+                    // Centered 16:9 Frame
+                    Rectangle()
+                        .strokeBorder(
+                            Color.white.opacity(isRecording ? 0.75 : 0.35),
+                            style: StrokeStyle(lineWidth: 1.0, dash: [4, 4])
+                        )
+                        .frame(width: horizontalCropRect.width, height: horizontalCropRect.height)
+                        .position(x: horizontalCropRect.midX, y: horizontalCropRect.midY)
 
-                // 5. Minimalist Micro-Badges
-                // 9:16 Vertical Tag
-                Text("9:16 VERTICAL")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.75))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.white.opacity(0.08), in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.7))
-                    .position(
-                        x: verticalCropRect.midX,
-                        y: verticalCropRect.minY + 22
-                    )
+                    // Corner Brackets
+                    CornerTicksShape(tickLength: 18)
+                        .stroke(
+                            Color.white.opacity(isRecording ? 0.95 : 0.7),
+                            style: StrokeStyle(lineWidth: 2.0, lineCap: .round)
+                        )
+                        .frame(width: horizontalCropRect.width, height: horizontalCropRect.height)
+                        .position(x: horizontalCropRect.midX, y: horizontalCropRect.midY)
 
-                // 16:9 Full Sensor Tag
-                Text("16:9 FULL SENSOR")
-                    .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2.5)
-                    .background(Color.white.opacity(0.06), in: Capsule())
-                    .position(
-                        x: verticalCropRect.midX,
-                        y: verticalCropRect.maxY - 18
-                    )
+                    // Reticle
+                    CenterReticleShape()
+                        .stroke(Color.white.opacity(0.55), lineWidth: 1.0)
+                        .frame(width: 20, height: 20)
+                        .position(x: horizontalCropRect.midX, y: horizontalCropRect.midY)
+
+                    // Rule of Thirds
+                    if showGrid {
+                        ThirdsGridShape()
+                            .stroke(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 0.8, dash: [3, 4]))
+                            .frame(width: horizontalCropRect.width, height: horizontalCropRect.height)
+                            .position(x: horizontalCropRect.midX, y: horizontalCropRect.midY)
+                    }
+
+                    // 16:9 Badge
+                    Text("16:9 CROP")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.white.opacity(0.08), in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.7))
+                        .position(x: horizontalCropRect.midX, y: horizontalCropRect.minY + 20)
+                }
             }
         }
         .allowsHitTesting(false)
-    }
-
-    private func aspectFillRect(aspectRatio: CGSize, insideRect containerRect: CGRect) -> CGRect {
-        let containerAspect = containerRect.width / containerRect.height
-        let videoAspect = aspectRatio.width / aspectRatio.height
-        let scale: CGFloat
-
-        if containerAspect > videoAspect {
-            scale = containerRect.width / aspectRatio.width
-        } else {
-            scale = containerRect.height / aspectRatio.height
-        }
-
-        let scaledWidth = aspectRatio.width * scale
-        let scaledHeight = aspectRatio.height * scale
-        let originX = containerRect.midX - (scaledWidth / 2.0)
-        let originY = containerRect.midY - (scaledHeight / 2.0)
-
-        return CGRect(x: originX, y: originY, width: scaledWidth, height: scaledHeight)
     }
 }
 
@@ -286,6 +317,12 @@ private struct CornerTicksShape: Shape {
 
 // MARK: - Main Camera SwiftUI View
 
+enum CameraCaptureMode: String, CaseIterable {
+    case foto = "FOTO"
+    case video = "VÍDEO"
+    case cine = "CINE"
+}
+
 struct CameraView: View {
     @StateObject private var cameraManager = CameraManager()
     @State private var pinchStartZoom: CGFloat?
@@ -293,11 +330,16 @@ struct CameraView: View {
     @State private var isZoomExpanded: Bool = false
     @State private var isPulseAnimating: Bool = false
     @State private var simulatedAudioLevel: CGFloat = 0.5
+    @State private var exposureValue: CGFloat = 0.5
+    @State private var isAdjustingExposure: Bool = false
+    @State private var activeMode: CameraCaptureMode = .video
+    @State private var uiRotationAngle: Double = 0.0
+    @State private var isLandscape: Bool = false
 
     var body: some View {
         GeometryReader { proxy in
             let safeInsets = proxy.safeAreaInsets
-            let horizontalMargin = max(20, max(safeInsets.leading, safeInsets.trailing))
+            let isCurrentLandscape = proxy.size.width > proxy.size.height
 
             ZStack {
                 Color.black.ignoresSafeArea()
@@ -307,55 +349,93 @@ struct CameraView: View {
                     .ignoresSafeArea()
                     .gesture(pinchToZoomGesture)
 
-                // 2. Centered 9:16 Safe-Area Framing Guide over 16:9 feed
-                FramingGuideOverlay(
+                // 2. Adaptive Crop Guides (Landscape vs Portrait)
+                AdaptiveCropGuides(
+                    isLandscape: isCurrentLandscape,
                     isRecording: cameraManager.isRecording,
                     showGrid: showGrid
                 )
                 .ignoresSafeArea()
 
-                // 3. Ergonomic, Ultra-Minimalist Monochromatic UI Controls
+                // 3. Ultra-Thin Lateral Exposure Slider (Right Edge)
+                lateralExposureSlider(screenHeight: proxy.size.height)
+                    .position(x: proxy.size.width - 16, y: proxy.size.height / 2.0)
+
+                // 4. Main Responsive UI Layout
                 VStack(spacing: 0) {
-                    // Top Bar: Unified Consolidated Pro HUD
-                    topUnifiedHUD
-                        .padding(.top, max(10, safeInsets.top))
-                        .padding(.horizontal, horizontalMargin)
+                    // Top Settings / Status Bar (Always at Physical Top)
+                    topSettingsBar
+                        .padding(.top, max(8, safeInsets.top))
+                        .padding(.horizontal, 16)
 
                     Spacer()
 
-                    // Bottom Row: Expanding Zoom Dial (Left) & Cinema Shutter (Right)
-                    HStack(alignment: .bottom) {
-                        // Left Thumb Zone: Contextual Expanding Zoom Control
-                        expandingZoomControl
-                            .padding(.leading, horizontalMargin)
-                            .padding(.bottom, max(16, safeInsets.bottom))
-
+                    // Floating Zoom Pill (Lower-Left Thumb Zone)
+                    HStack {
+                        floatingZoomControl
+                            .padding(.leading, max(16, safeInsets.leading))
+                            .padding(.bottom, 12)
                         Spacer()
-
-                        // Toast Notification Banner (Centered)
-                        if let banner = cameraManager.statusMessage {
-                            statusToastView(banner)
-                                .padding(.bottom, max(20, safeInsets.bottom))
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                        }
-
-                        Spacer()
-
-                        // Right Thumb Zone: Monochromatic Cinema Shutter
-                        cinemaShutterButton
-                            .padding(.trailing, horizontalMargin)
-                            .padding(.bottom, max(16, safeInsets.bottom))
                     }
+
+                    // Main Control Dock (Bottom Action Carousel, Shutter, Gallery, Quick Photo)
+                    bottomControlDock
+                        .padding(.bottom, max(14, safeInsets.bottom))
                 }
+            }
+            .onAppear {
+                self.isLandscape = isCurrentLandscape
+                updateOrientationAngle(for: isCurrentLandscape)
+            }
+            .onChange(of: isCurrentLandscape) { newValue in
+                self.isLandscape = newValue
+                updateOrientationAngle(for: newValue)
             }
         }
         .statusBarHidden(true)
         .onAppear {
             cameraManager.start()
             startAudioVUSimulation()
+            listenToOrientationChanges()
         }
         .onDisappear {
             cameraManager.stop()
+        }
+    }
+
+    // MARK: - Fluid UI Rotation Tracking
+
+    private func listenToOrientationChanges() {
+        NotificationCenter.default.addObserver(
+            forName: UIDevice.orientationDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            let deviceOrientation = UIDevice.current.orientation
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                switch deviceOrientation {
+                case .portrait:
+                    uiRotationAngle = 0.0
+                case .landscapeLeft:
+                    uiRotationAngle = 90.0
+                case .landscapeRight:
+                    uiRotationAngle = -90.0
+                case .portraitUpsideDown:
+                    uiRotationAngle = 180.0
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    private func updateOrientationAngle(for isLand: Bool) {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+            if isLand {
+                uiRotationAngle = (UIDevice.current.orientation == .landscapeRight) ? -90.0 : 90.0
+            } else {
+                uiRotationAngle = 0.0
+            }
         }
     }
 
@@ -375,38 +455,33 @@ struct CameraView: View {
             }
     }
 
-    // MARK: - Top Unified Consolidated Pro HUD (Ultra-Minimalist Monochromatic)
+    // MARK: - Top Settings Bar (Quality Dropdown, Mic VU, Toggles)
 
-    private var topUnifiedHUD: some View {
+    private var topSettingsBar: some View {
         HStack(spacing: 8) {
-            // Format & Codec Info
+            // Quality Dropdown Pill ("4K UHD · 30FPS ⌄")
             HStack(spacing: 4) {
-                Text(cameraManager.activeResolutionLabel)
+                Text("\(cameraManager.activeResolutionLabel) · 30FPS")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
-                Text("•")
-                    .font(.system(size: 8))
-                    .foregroundStyle(.white.opacity(0.35))
-                Text("30FPS")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.7))
-                Text("•")
-                    .font(.system(size: 8))
-                    .foregroundStyle(.white.opacity(0.35))
-                Text("HEVC")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
+                    .rotationEffect(.degrees(uiRotationAngle))
+                    .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .rotationEffect(.degrees(uiRotationAngle))
+                    .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
             }
-            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.white.opacity(0.08), in: Capsule())
 
             dividerLine
 
-            // Central State: Recording Timecode or Dual Stream Badge
+            // Dual Stream or Recording Status
             if cameraManager.isRecording {
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Circle()
                         .fill(Color.white)
                         .frame(width: 6, height: 6)
@@ -418,75 +493,55 @@ struct CameraView: View {
                     Text(formattedTimecode(cameraManager.recordingDuration))
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white)
+                        .rotationEffect(.degrees(uiRotationAngle))
+                        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
                 }
-                .fixedSize()
             } else {
-                HStack(spacing: 5) {
-                    Image(systemName: "rectangle.split.2x1")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.6))
-                    Text("DUAL 16:9 + 9:16")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.75))
-                }
-                .fixedSize()
+                Text("DUAL 16:9 + 9:16")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .rotationEffect(.degrees(uiRotationAngle))
+                    .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
             }
 
             dividerLine
 
-            // Pro Audio: Microphone + Dynamic VU Meter
-            HStack(spacing: 4) {
+            // Micro VU Meter + Mic
+            HStack(spacing: 3) {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .rotationEffect(.degrees(uiRotationAngle))
+                    .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
 
-                // Micro VU Meter: 4 dynamic vertical bars
                 HStack(spacing: 1.5) {
-                    ForEach(0..<4, id: \.self) { index in
-                        let threshold = CGFloat(index + 1) * 0.25
+                    ForEach(0..<3, id: \.self) { idx in
+                        let threshold = CGFloat(idx + 1) * 0.33
                         let isActive = simulatedAudioLevel >= threshold
                         RoundedRectangle(cornerRadius: 1)
-                            .fill(Color.white.opacity(isActive ? 0.95 : 0.25))
-                            .frame(width: 2, height: CGFloat(4 + index * 2))
+                            .fill(Color.white.opacity(isActive ? 1.0 : 0.25))
+                            .frame(width: 2, height: CGFloat(4 + idx * 2.5))
                     }
                 }
-                .frame(height: 10)
             }
-            .fixedSize()
 
             dividerLine
 
-            // Storage / Estimated Remaining Time
-            HStack(spacing: 3) {
-                Image(systemName: "internaldrive")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.5))
-                Text("1h 42m")
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.65))
-            }
-            .fixedSize()
-
-            dividerLine
-
-            // Toggles: Grid & Torch (Strictly Monochromatic via Opacity)
+            // Toggles: Grid & Torch
             HStack(spacing: 6) {
-                // Grid Toggle
                 Button {
                     hapticFeedback(.light)
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        showGrid.toggle()
-                    }
+                    withAnimation(.easeInOut(duration: 0.15)) { showGrid.toggle() }
                 } label: {
                     Image(systemName: "grid")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white)
                         .opacity(showGrid ? 1.0 : 0.4)
+                        .rotationEffect(.degrees(uiRotationAngle))
+                        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
                         .frame(width: 24, height: 24)
-                        .background(Color.white.opacity(showGrid ? 0.12 : 0.0), in: Circle())
                 }
 
-                // Torch Toggle
                 if cameraManager.isTorchAvailable {
                     Button {
                         hapticFeedback(.light)
@@ -496,24 +551,22 @@ struct CameraView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.white)
                             .opacity(cameraManager.isTorchOn ? 1.0 : 0.4)
+                            .rotationEffect(.degrees(uiRotationAngle))
+                            .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
                             .frame(width: 24, height: 24)
-                            .background(Color.white.opacity(cameraManager.isTorchOn ? 0.12 : 0.0), in: Circle())
                     }
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .background(
             Color.white.opacity(0.04)
                 .background(.ultraThinMaterial)
         )
         .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8)
-        )
-        .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 4)
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
         .environment(\.colorScheme, .dark)
     }
 
@@ -523,11 +576,52 @@ struct CameraView: View {
             .frame(width: 1, height: 12)
     }
 
-    // MARK: - Contextual Expanding Zoom Control (Lower-Left Thumb Zone)
+    // MARK: - Ultra-Thin Lateral Exposure Slider (2px, expands on touch)
 
-    private var expandingZoomControl: some View {
+    private func lateralExposureSlider(screenHeight: CGFloat) -> some View {
+        VStack {
+            ZStack(alignment: .top) {
+                // Track: 2px thickness with 10% opacity at rest; 4px on touch
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.white.opacity(isAdjustingExposure ? 0.85 : 0.10))
+                    .frame(width: isAdjustingExposure ? 4 : 2, height: 160)
+                    .animation(.easeInOut(duration: 0.2), value: isAdjustingExposure)
+
+                // Sun Indicator Thumb (Rotates on its own axis)
+                Circle()
+                    .fill(Color.white.opacity(0.15))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Image(systemName: "sun.max.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .rotationEffect(.degrees(uiRotationAngle))
+                            .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+                    )
+                    .offset(y: (1.0 - exposureValue) * 136)
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        isAdjustingExposure = true
+                        let clamped = min(max(1.0 - (value.location.y / 160.0), 0.0), 1.0)
+                        exposureValue = clamped
+                    }
+                    .onEnded { _ in
+                        withAnimation(.easeOut(duration: 0.4)) {
+                            isAdjustingExposure = false
+                        }
+                    }
+            )
+        }
+        .frame(width: 36, height: 180)
+    }
+
+    // MARK: - Floating Expanding Zoom Control (Discreet 1.0x Pill)
+
+    private var floatingZoomControl: some View {
         HStack(spacing: 4) {
-            // Resting Pill Button (Current Zoom Factor)
             Button {
                 hapticFeedback(.light)
                 withAnimation(.spring(response: 0.32, dampingFraction: 0.75)) {
@@ -537,37 +631,35 @@ struct CameraView: View {
                 Text(String(format: "%.1f×", cameraManager.zoomFactor))
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
+                    .rotationEffect(.degrees(uiRotationAngle))
+                    .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+                    .frame(width: 34, height: 34)
                     .background(Color.white.opacity(0.10), in: Circle())
             }
 
-            // Expanded Preset Dial (Springs open horizontally on tap)
             if isZoomExpanded {
-                HStack(spacing: 4) {
-                    ForEach(zoomPresets, id: \.self) { preset in
+                HStack(spacing: 3) {
+                    ForEach([0.5, 1.0, 2.0, 3.0, 5.0], id: \.self) { preset in
                         let isSelected = abs(cameraManager.zoomFactor - preset) < 0.12
                         Button {
                             hapticFeedback(.light)
                             withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) {
                                 cameraManager.setZoomFactor(preset)
+                                isZoomExpanded = false
                             }
                         } label: {
-                            Text(presetLabel(for: preset))
+                            Text(preset == 0.5 ? ".5" : String(format: "%.0f", preset))
                                 .font(.system(size: 10, weight: isSelected ? .bold : .medium, design: .monospaced))
-                                .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.65))
-                                .frame(width: 28, height: 28)
-                                .background(
-                                    isSelected ? Color.white : Color.clear,
-                                    in: Circle()
-                                )
+                                .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.7))
+                                .rotationEffect(.degrees(uiRotationAngle))
+                                .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+                                .frame(width: 26, height: 26)
+                                .background(isSelected ? Color.white : Color.clear, in: Circle())
                         }
                     }
                 }
                 .padding(.horizontal, 4)
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.8, anchor: .leading).combined(with: .opacity),
-                    removal: .scale(scale: 0.8, anchor: .leading).combined(with: .opacity)
-                ))
+                .transition(.scale(scale: 0.8, anchor: .leading).combined(with: .opacity))
             }
         }
         .padding(3)
@@ -576,78 +668,119 @@ struct CameraView: View {
                 .background(.ultraThinMaterial)
         )
         .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8)
-        )
-        .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 3)
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8))
         .environment(\.colorScheme, .dark)
     }
 
-    private var zoomPresets: [CGFloat] {
-        var list: [CGFloat] = []
-        if cameraManager.minZoomFactor < 0.9 {
-            list.append(0.5)
-        }
-        list.append(contentsOf: [1.0, 2.0, 3.0, 5.0])
-        return list.filter { $0 >= cameraManager.minZoomFactor && $0 <= cameraManager.maxZoomFactor }
-    }
+    // MARK: - Bottom Control Dock (Carousel, Shutter, Quick Photo, Gallery)
 
-    private func presetLabel(for preset: CGFloat) -> String {
-        if preset == 0.5 { return ".5" }
-        return String(format: "%.0f", preset)
-    }
+    private var bottomControlDock: some View {
+        VStack(spacing: 12) {
+            // Mode Carousel: "FOTO | VÍDEO | CINE" with active dot
+            HStack(spacing: 24) {
+                ForEach(CameraCaptureMode.allCases, id: \.self) { mode in
+                    let isSelected = activeMode == mode
+                    Button {
+                        hapticFeedback(.light)
+                        withAnimation(.easeInOut(duration: 0.2)) { activeMode = mode }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Text(mode.rawValue)
+                                .font(.system(size: 11, weight: isSelected ? .bold : .medium, design: .monospaced))
+                                .foregroundStyle(.white)
+                                .opacity(isSelected ? 1.0 : 0.4)
+                                .rotationEffect(.degrees(uiRotationAngle))
+                                .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
 
-    // MARK: - Monochromatic Cinema Shutter (Lower-Right Thumb Zone)
-
-    private var cinemaShutterButton: some View {
-        VStack(spacing: 6) {
-            Button {
-                hapticFeedback(.medium)
-                cameraManager.toggleRecording()
-            } label: {
-                ZStack {
-                    // Outer Fine Ring
-                    Circle()
-                        .strokeBorder(Color.white.opacity(0.85), lineWidth: 2.5)
-                        .frame(width: 70, height: 70)
-
-                    if cameraManager.isSaving {
-                        ProgressView()
-                            .tint(.white)
-                    } else {
-                        // Inner Pure White Disc (Morphs smoothly into rounded square on record)
-                        RoundedRectangle(
-                            cornerRadius: cameraManager.isRecording ? 5 : 27,
-                            style: .continuous
-                        )
-                        .fill(Color.white)
-                        .frame(
-                            width: cameraManager.isRecording ? 26 : 54,
-                            height: cameraManager.isRecording ? 26 : 54
-                        )
-                        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: cameraManager.isRecording)
-
-                        // Subtle animated outer ping ring when recording
-                        if cameraManager.isRecording {
                             Circle()
-                                .stroke(Color.white.opacity(0.3), lineWidth: 1.5)
-                                .frame(width: 76, height: 76)
+                                .fill(isSelected ? Color.white : Color.clear)
+                                .frame(width: 3.5, height: 3.5)
                         }
                     }
                 }
             }
-            .disabled(!cameraManager.isSessionRunning || cameraManager.isSaving)
-            .accessibilityLabel(cameraManager.isRecording ? "Stop Recording" : "Start Recording")
 
-            // Minimalist Action Label
-            Text(cameraManager.isSaving ? "SAVING" : (cameraManager.isRecording ? "STOP" : "REC"))
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.45))
+            // Capture Triad: [Gallery] - [Shutter REC] - [Quick Photo]
+            HStack {
+                // 1. Gallery Thumbnail (Symmetrical)
+                Button {
+                    hapticFeedback(.light)
+                } label: {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.white.opacity(0.08))
+                            .frame(width: 44, height: 44)
+                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
+
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .rotationEffect(.degrees(uiRotationAngle))
+                            .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+                    }
+                }
+
+                Spacer()
+
+                // 2. Large Clean Shutter Button (72pt)
+                Button {
+                    hapticFeedback(.medium)
+                    cameraManager.toggleRecording()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .strokeBorder(Color.white.opacity(0.85), lineWidth: 3)
+                            .frame(width: 72, height: 72)
+
+                        if cameraManager.isSaving {
+                            ProgressView().tint(.white)
+                        } else {
+                            RoundedRectangle(
+                                cornerRadius: cameraManager.isRecording ? 6 : 28,
+                                style: .continuous
+                            )
+                            .fill(Color.white)
+                            .frame(
+                                width: cameraManager.isRecording ? 28 : 56,
+                                height: cameraManager.isRecording ? 28 : 56
+                            )
+                            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: cameraManager.isRecording)
+
+                            if cameraManager.isRecording {
+                                Circle()
+                                    .stroke(Color.white.opacity(0.3), lineWidth: 1.5)
+                                    .frame(width: 78, height: 78)
+                            }
+                        }
+                    }
+                }
+                .disabled(!cameraManager.isSessionRunning || cameraManager.isSaving)
+
+                Spacer()
+
+                // 3. Quick Photo Button (Secondary Snapshot)
+                Button {
+                    hapticFeedback(.light)
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.08))
+                            .frame(width: 44, height: 44)
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
+
+                        Image(systemName: "camera.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.white)
+                            .rotationEffect(.degrees(uiRotationAngle))
+                            .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+                    }
+                }
+            }
+            .frame(maxWidth: 320)
         }
     }
 
-    // MARK: - Helpers & Animations
+    // MARK: - Helpers
 
     private func startAudioVUSimulation() {
         Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { _ in
@@ -658,32 +791,10 @@ struct CameraView: View {
         }
     }
 
-    private func statusToastView(_ text: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white)
-
-            Text(text)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color.black.opacity(0.85), in: Capsule())
-        .overlay(
-            Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 0.8)
-        )
-    }
-
     private func formattedTimecode(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
-        let hours = total / 3600
-        let mins = (total % 3600) / 60
+        let mins = total / 60
         let secs = total % 60
-        if hours > 0 {
-            return String(format: "%02d:%02d:%02d", hours, mins, secs)
-        }
         return String(format: "%02d:%02d", mins, secs)
     }
 

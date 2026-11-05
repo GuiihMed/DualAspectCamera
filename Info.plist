@@ -30,6 +30,7 @@
 	<string>DualAspectCamera needs Photo Library access to export your recorded 16:9 and 9:16 videos.</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
+		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 	</array>

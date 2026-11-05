@@ -500,36 +500,50 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
         AVEncoderBitRateKey: 128_000
     ]
 
-    // MARK: - Orientation Sync (Landscape 16:9 Capture)
+    // MARK: - Orientation Sync (Fluid Portrait & Landscape Capture)
 
     func updateInterfaceOrientation(_ orientation: UIInterfaceOrientation) {
-        guard orientation == .landscapeLeft || orientation == .landscapeRight else { return }
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.processingQueue.async {
                 // Never rotate capture buffer geometry mid-recording.
                 guard !self.isRecordingRequested else { return }
                 if let connection = self.videoDataOutput.connection(with: .video) {
-                    self.applyLandscapeRotation(to: connection, interfaceOrientation: orientation)
+                    self.applyRotation(to: connection, interfaceOrientation: orientation)
                 }
             }
         }
     }
 
-    func applyLandscapeRotation(to connection: AVCaptureConnection, interfaceOrientation: UIInterfaceOrientation) {
-        // Rear camera native sensor orientation (0°) corresponds to .landscapeRight (camera top-left).
-        let angle: CGFloat = (interfaceOrientation == .landscapeLeft) ? 180.0 : 0.0
+    func applyRotation(to connection: AVCaptureConnection, interfaceOrientation: UIInterfaceOrientation) {
+        let angle: CGFloat
+        switch interfaceOrientation {
+        case .portrait: angle = 90.0
+        case .portraitUpsideDown: angle = 270.0
+        case .landscapeLeft: angle = 180.0
+        case .landscapeRight: angle = 0.0
+        default: angle = 90.0
+        }
+
         if #available(iOS 17.0, *) {
             if connection.isVideoRotationAngleSupported(angle) {
                 connection.videoRotationAngle = angle
             }
         } else {
             if connection.isVideoOrientationSupported {
-                connection.videoOrientation = (interfaceOrientation == .landscapeLeft)
-                    ? .landscapeLeft
-                    : .landscapeRight
+                switch interfaceOrientation {
+                case .portrait: connection.videoOrientation = .portrait
+                case .portraitUpsideDown: connection.videoOrientation = .portraitUpsideDown
+                case .landscapeLeft: connection.videoOrientation = .landscapeLeft
+                case .landscapeRight: connection.videoOrientation = .landscapeRight
+                default: connection.videoOrientation = .portrait
+                }
             }
         }
+    }
+
+    func applyLandscapeRotation(to connection: AVCaptureConnection, interfaceOrientation: UIInterfaceOrientation) {
+        applyRotation(to: connection, interfaceOrientation: interfaceOrientation)
     }
 
     // MARK: - Real-Time Hardware Zoom
