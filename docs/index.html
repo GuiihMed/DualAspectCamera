@@ -62,7 +62,11 @@
         transform: translateY(-50%) !important;
         width: auto !important;
         gap: 12px !important;
+        padding-bottom: 0 !important;
       }
+    }
+    footer {
+      padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 24px));
     }
   </style>
 </head>
@@ -239,38 +243,63 @@
       setTimeout(() => { toast.style.opacity = '0'; }, 2500);
     }
 
-    // 1. Inicializar Câmera
+    // 1. Inicializar Câmera (com fallback progressivo para Android e navegadores móveis)
     async function initCamera() {
       if (videoStream) {
-        videoStream.getTracks().forEach(t => t.stop());
+        try { videoStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+        videoStream = null;
       }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: activeFacingMode,
-            width: { ideal: activeResolution === '4K' ? 3840 : (activeResolution === '1080p' ? 1920 : 1280) },
-            height: { ideal: activeResolution === '4K' ? 2160 : (activeResolution === '1080p' ? 1080 : 720) },
-            frameRate: { ideal: activeFPS }
-          },
-          audio: true
-        });
+
+      const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+      const idealW = activeResolution === '4K' ? 3840 : (activeResolution === '1080p' ? 1920 : 1280);
+      const idealH = activeResolution === '4K' ? 2160 : (activeResolution === '1080p' ? 1080 : 720);
+
+      const attempts = [
+        // 1. Resolução ideal com áudio
+        { video: { facingMode: activeFacingMode, width: { ideal: idealW }, height: { ideal: idealH }, frameRate: { ideal: activeFPS } }, audio: true },
+        // 2. 1080p padrão com áudio (ideal para WebRTC em Android)
+        { video: { facingMode: activeFacingMode, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: true },
+        // 3. Câmera com áudio sem restrição rígida de tamanho
+        { video: { facingMode: activeFacingMode }, audio: true },
+        // 4. Apenas vídeo (caso o microfone esteja ocupado ou bloqueado no Android)
+        { video: { facingMode: activeFacingMode }, audio: false },
+        // 5. Fallback irrestrito
+        { video: true, audio: false }
+      ];
+
+      let stream = null;
+      for (const constraints of attempts) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          if (stream) break;
+        } catch (e) {
+          console.warn('Tentativa com restrições falhou, tentando próxima:', e);
+        }
+      }
+
+      if (stream) {
         video.srcObject = stream;
         videoStream = stream;
+        video.onloadedmetadata = () => {
+          video.play().catch(e => console.warn('Falha no autoplay:', e));
+        };
+        video.play().catch(() => {});
         initAudioVU(stream);
         applyZoom(zoomLevel);
         applyExposure(exposureVal);
-      } catch (err) {
-        console.warn('Erro ao inicializar câmera:', err);
-        try {
-          const fallback = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-          video.srcObject = fallback;
-          videoStream = fallback;
-          initAudioVU(fallback);
-        } catch (e) {
-          showToast('Permissão de câmera negada');
-        }
+      } else {
+        showToast('Toque na tela para autorizar câmera');
       }
     }
+
+    // Auto-recuperação ao voltar para o app após conceder permissões no Android
+    window.addEventListener('focus', () => { if (!videoStream) initCamera(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && !videoStream) initCamera();
+    });
+    document.body.addEventListener('click', () => {
+      if (!videoStream) initCamera();
+    }, { once: true });
 
     // 2. VU Meter Real de Áudio
     function initAudioVU(stream) {
@@ -359,10 +388,11 @@
       if (videoStream) {
         const track = videoStream.getVideoTracks()[0];
         const caps = track.getCapabilities ? track.getCapabilities() : {};
-        if (caps.zoom) {
+        if (caps.zoom && caps.zoom.min !== undefined && zoomLevel >= caps.zoom.min && zoomLevel <= caps.zoom.max) {
+          video.style.transform = 'scale(1)';
           track.applyConstraints({ advanced: [{ zoom: zoomLevel }] }).catch(() => {});
         } else {
-          video.style.transform = `scale(${Math.max(0.7, zoomLevel)})`;
+          video.style.transform = `scale(${zoomLevel})`;
         }
       }
 
@@ -457,7 +487,24 @@
       });
     });
 
-    // 7. Captura de Foto Real (Canvas Stills)
+    // Helper para detectar formato de gravação de vídeo suportado no aparelho
+    function getBestMimeType() {
+      const candidates = [
+        'video/webm;codecs=vp8,opus',
+        'video/webm;codecs=vp9,opus',
+        'video/webm',
+        'video/mp4;codecs=avc1,mp4a.40.2',
+        'video/mp4'
+      ];
+      for (const c of candidates) {
+        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)) {
+          return c;
+        }
+      }
+      return '';
+    }
+
+    // 7. Captura de Foto Real (com suporte nativo Android e Web)
     function capturePhoto() {
       flashOverlay.style.opacity = '0.9';
       setTimeout(() => { flashOverlay.style.opacity = '0'; }, 180);
@@ -469,18 +516,28 @@
       const ctx = photoCanvas.getContext('2d');
       ctx.drawImage(video, 0, 0, w, h);
 
-      photoCanvas.toBlob(blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `DualCam_Photo_${Date.now()}.jpg`;
-        a.click();
+      const dataUrl = photoCanvas.toDataURL('image/jpeg', 0.95);
+      const fileName = `DualCam_Photo_${Date.now()}.jpg`;
 
-        // Atualizar miniatura da galeria
-        const thumbContainer = document.getElementById('galleryThumbContainer');
-        thumbContainer.innerHTML = `<img src="${url}" class="w-full h-full object-cover rounded-[10px]" />`;
-        showToast('Foto salva!');
-      }, 'image/jpeg', 0.95);
+      // Atualizar miniatura da galeria
+      const thumbContainer = document.getElementById('galleryThumbContainer');
+      thumbContainer.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover rounded-[10px]" />`;
+
+      // Se executando no Android nativo via WebView
+      if (window.AndroidBridge && window.AndroidBridge.saveImage) {
+        window.AndroidBridge.saveImage(dataUrl, fileName);
+      } else {
+        photoCanvas.toBlob(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          showToast('Foto salva!');
+        }, 'image/jpeg', 0.95);
+      }
     }
 
     document.getElementById('btnQuickPhoto').addEventListener('click', capturePhoto);
@@ -518,18 +575,44 @@
 
         if (videoStream) {
           recordedChunks = [];
-          mediaRecorder = new MediaRecorder(videoStream, { mimeType: 'video/webm;codecs=vp8,opus' });
-          mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
-          mediaRecorder.onstop = () => {
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `DualCam_${currentMode === 'CINE' ? 'Cine_24fps' : 'Video'}_${Date.now()}.webm`;
-            a.click();
-            showToast('Vídeo salvo na Galeria!');
+          const bestMime = getBestMimeType();
+          const options = bestMime ? { mimeType: bestMime } : {};
+          try {
+            mediaRecorder = new MediaRecorder(videoStream, options);
+          } catch (e) {
+            console.warn('MediaRecorder com opções falhou, usando padrão:', e);
+            mediaRecorder = new MediaRecorder(videoStream);
+          }
+
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) recordedChunks.push(e.data);
           };
-          mediaRecorder.start();
+
+          mediaRecorder.onstop = () => {
+            const actualMime = mediaRecorder.mimeType || bestMime || 'video/webm';
+            const blob = new Blob(recordedChunks, { type: actualMime });
+            const ext = actualMime.includes('mp4') ? 'mp4' : 'webm';
+            const fileName = `DualCam_${currentMode === 'CINE' ? 'Cine_24fps' : 'Video'}_${Date.now()}.${ext}`;
+
+            if (window.AndroidBridge && window.AndroidBridge.saveVideo) {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                window.AndroidBridge.saveVideo(reader.result, fileName);
+              };
+              reader.readAsDataURL(blob);
+            } else {
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = fileName;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              showToast('Vídeo salvo!');
+            }
+          };
+
+          mediaRecorder.start(1000);
         }
       } else {
         // Parar
@@ -576,7 +659,11 @@
 
     // 10. Botão Galeria
     document.getElementById('btnGallery').addEventListener('click', () => {
-      showToast('Abrindo downloads/galeria...');
+      if (window.AndroidBridge && window.AndroidBridge.openGallery) {
+        window.AndroidBridge.openGallery();
+      } else {
+        showToast('Abrindo galeria do dispositivo...');
+      }
     });
 
     // 11. Guias de Corte
