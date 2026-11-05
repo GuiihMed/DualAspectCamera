@@ -17,7 +17,7 @@ enum CameraError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .cameraUnavailable:
-            return "Main rear wide-angle camera is unavailable."
+            return "Camera is unavailable."
         case .permissionDenied(let resource):
             return "\(resource) permission was denied. Enable it in Settings."
         case .writerFailedToStart:
@@ -36,8 +36,6 @@ enum CameraError: LocalizedError {
 
 // MARK: - Single-Aspect Hardware Asset Writer Wrapper
 
-/// Encapsulates a single `AVAssetWriter` pipeline (video + optional audio) for one aspect ratio.
-/// All methods MUST be invoked exclusively on `CameraManager.processingQueue`.
 final class AspectAssetWriter {
     let outputURL: URL
     let width: Int
@@ -72,7 +70,6 @@ final class AspectAssetWriter {
             AVVideoMaxKeyFrameIntervalKey: 30
         ]
 
-        // Prefer hardware HEVC encoding for lower thermal & I/O load; fall back to H.264 if needed.
         var videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.hevc,
             AVVideoWidthKey: width,
@@ -86,7 +83,6 @@ final class AspectAssetWriter {
         let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         vInput.expectsMediaDataInRealTime = true
 
-        // Match native camera bi-planar YUV (420f) + IOSurface + Metal to avoid RGB conversions.
         let sourceBufferAttributes: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange),
             kCVPixelBufferWidthKey as String: width,
@@ -147,7 +143,6 @@ final class AspectAssetWriter {
         let srcWidth = CVPixelBufferGetWidth(sourceBuffer)
         let srcHeight = CVPixelBufferGetHeight(sourceBuffer)
 
-        // Fast path: when source frame already matches target 16:9 dimensions, pass buffer zero-copy.
         if allowZeroCopyPassthrough,
            srcWidth == width,
            srcHeight == height,
@@ -162,10 +157,8 @@ final class AspectAssetWriter {
         let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &outputBuffer)
         guard status == kCVReturnSuccess, let dstBuffer = outputBuffer else { return }
 
-        // Preserve Rec.709 / P3 YCbCr matrix, primaries, and transfer function attachments.
         CVBufferPropagateAttachments(sourceBuffer, dstBuffer)
 
-        // 1. Crop and shift origin to (0, 0) so CIContext aligns with the destination CVPixelBuffer.
         var processed = sourceImage
             .cropped(to: cropRect)
             .transformed(by: CGAffineTransform(
@@ -173,7 +166,6 @@ final class AspectAssetWriter {
                 y: -cropRect.origin.y
             ))
 
-        // 2. Scale if writer target dimensions differ from cropRect size.
         let scaleX = CGFloat(width) / cropRect.width
         let scaleY = CGFloat(height) / cropRect.height
         if abs(scaleX - 1.0) > 0.001 || abs(scaleY - 1.0) > 0.001 {
@@ -192,7 +184,6 @@ final class AspectAssetWriter {
               let audioInput,
               audioInput.isReadyForMoreMediaData else { return }
 
-        // Duplicate CMSampleBuffer metadata container so two AVAssetWriters never race on attachments.
         var copiedSampleBuffer: CMSampleBuffer?
         let copyStatus = CMSampleBufferCreateCopy(
             allocator: kCFAllocatorDefault,
@@ -248,23 +239,31 @@ private final class WriterBatchResult: @unchecked Sendable {
 // MARK: - CameraManager
 
 final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
-    // MARK: Published UI State (Always updated on Main Thread)
+    // MARK: Published UI State
     @Published private(set) var isSessionRunning: Bool = false
     @Published private(set) var isRecording: Bool = false
     @Published private(set) var isSaving: Bool = false
     @Published private(set) var zoomFactor: CGFloat = 1.0
-    @Published private(set) var minZoomFactor: CGFloat = 1.0
-    @Published private(set) var maxZoomFactor: CGFloat = 5.0
+    @Published private(set) var minZoomFactor: CGFloat = 0.5
+    @Published private(set) var maxZoomFactor: CGFloat = 10.0
+    @Published private(set) var isUltraWideAvailable: Bool = false
     @Published private(set) var recordingDuration: TimeInterval = 0
     @Published private(set) var activeResolutionLabel: String = "4K UHD"
+    @Published private(set) var sessionPreset: AVCaptureSession.Preset = .hd4K3840x2160
+    @Published private(set) var activeFPS: Int32 = 30
     @Published private(set) var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     @Published var statusMessage: String?
     @Published private(set) var isTorchAvailable: Bool = false
     @Published private(set) var isTorchOn: Bool = false
+    @Published private(set) var isFrontCamera: Bool = false
+    @Published private(set) var currentExposureBias: Float = 0.0
+    @Published private(set) var minExposureBias: Float = -2.0
+    @Published private(set) var maxExposureBias: Float = 2.0
+    @Published private(set) var latestThumbnail: UIImage? = nil
 
     // MARK: Capture Pipeline Properties
     let session = AVCaptureSession()
-    private let maxAllowedZoom: CGFloat = 5.0
+    private var wideBaseZoomMultiplier: CGFloat = 1.0
 
     private let sessionQueue = DispatchQueue(
         label: "com.dualaspect.camera.sessionQueue",
@@ -278,10 +277,10 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
     private var videoDevice: AVCaptureDevice?
     private let videoDataOutput = AVCaptureVideoDataOutput()
     private let audioDataOutput = AVCaptureAudioDataOutput()
+    private let photoOutput = AVCapturePhotoOutput()
     private var isConfigured = false
     private var hasAudioInput = false
 
-    // Metal-backed CIContext with unmanaged color space to avoid costly YUV->LinearRGB->YUV conversions.
     private let ciContext: CIContext = {
         let options: [CIContextOption: Any] = [
             .workingColorSpace: NSNull(),
@@ -294,7 +293,7 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
         return CIContext(options: options)
     }()
 
-    // Writer State (Accessed exclusively on processingQueue)
+    // Writer State
     private var isRecordingRequested = false
     private var horizontalWriter: AspectAssetWriter?
     private var verticalWriter: AspectAssetWriter?
@@ -341,6 +340,8 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
                     }
                 }
             }
+
+            fetchLatestPhotoThumbnail()
         }
     }
 
@@ -377,12 +378,18 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
 
-        // Explicitly select the main rear wide-angle camera.
-        guard let rearCamera = AVCaptureDevice.default(
-            .builtInWideAngleCamera,
-            for: .video,
+        // Discover best rear camera system: Triple Camera -> Dual Wide -> Standard Wide
+        let discoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [
+                .builtInTripleCamera,
+                .builtInDualWideCamera,
+                .builtInWideAngleCamera
+            ],
+            mediaType: .video,
             position: .back
-        ) else {
+        )
+
+        guard let rearCamera = discoverySession.devices.first ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
             publishStatus(CameraError.cameraUnavailable.localizedDescription)
             return
         }
@@ -390,7 +397,7 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
         do {
             let videoInput = try AVCaptureDeviceInput(device: rearCamera)
             guard session.canAddInput(videoInput) else {
-                publishStatus("Unable to attach rear camera input.")
+                publishStatus("Unable to attach camera input.")
                 return
             }
             session.addInput(videoInput)
@@ -400,34 +407,46 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
             return
         }
 
-        // Highest available 16:9 resolution preset (preferring 4K 3840x2160).
-        let resolutionText: String
-        if session.canSetSessionPreset(.hd4K3840x2160) {
-            session.sessionPreset = .hd4K3840x2160
-            resolutionText = "4K UHD"
-        } else if session.canSetSessionPreset(.hd1920x1080) {
-            session.sessionPreset = .hd1920x1080
-            resolutionText = "1080p FHD"
-        } else {
-            session.sessionPreset = .high
-            resolutionText = "High"
-        }
+        // Resolution preset
+        let initialPreset: AVCaptureSession.Preset = session.canSetSessionPreset(.hd4K3840x2160) ? .hd4K3840x2160 : (session.canSetSessionPreset(.hd1920x1080) ? .hd1920x1080 : .high)
+        session.sessionPreset = initialPreset
+        let resolutionText = (initialPreset == .hd4K3840x2160) ? "4K UHD" : ((initialPreset == .hd1920x1080) ? "1080p FHD" : "HD")
 
         configureCameraHardwareDefaults(rearCamera, fps: 30)
 
-        let minZoom = rearCamera.minAvailableVideoZoomFactor
-        let maxZoom = min(maxAllowedZoom, rearCamera.maxAvailableVideoZoomFactor)
+        // Ultra-wide check: on triple/dualWide camera, switchover to 1.0x wide lens is usually at hardware zoom 2.0.
+        let isVirtualMulti = (rearCamera.deviceType == .builtInTripleCamera || rearCamera.deviceType == .builtInDualWideCamera)
+        let switchFactors = rearCamera.virtualDeviceSwitchOverVideoZoomFactors
+        let baseMultiplier: CGFloat = (isVirtualMulti && !switchFactors.isEmpty) ? CGFloat(switchFactors[0].doubleValue) : (isVirtualMulti ? 2.0 : 1.0)
+        self.wideBaseZoomMultiplier = baseMultiplier
+
+        let hasUltraWide = isVirtualMulti || (baseMultiplier > 1.0)
+        let minUserZoom: CGFloat = hasUltraWide ? 0.5 : 1.0
+        let maxUserZoom: CGFloat = min(10.0, rearCamera.maxAvailableVideoZoomFactor / max(1.0, baseMultiplier))
         let hasTorch = rearCamera.hasTorch && rearCamera.isTorchAvailable
+
+        let minBias = rearCamera.minExposureTargetBias
+        let maxBias = rearCamera.maxExposureTargetBias
+
         DispatchQueue.main.async {
-            self.minZoomFactor = minZoom
-            self.maxZoomFactor = maxZoom
-            self.zoomFactor = rearCamera.videoZoomFactor
+            self.isUltraWideAvailable = hasUltraWide
+            self.minZoomFactor = minUserZoom
+            self.maxZoomFactor = max(minUserZoom, maxUserZoom)
+            self.zoomFactor = 1.0
+            self.sessionPreset = initialPreset
             self.activeResolutionLabel = resolutionText
+            self.activeFPS = 30
             self.isTorchAvailable = hasTorch
             self.isTorchOn = (rearCamera.torchMode == .on)
+            self.minExposureBias = minBias
+            self.maxExposureBias = maxBias
+            self.currentExposureBias = 0.0
         }
 
-        // Video frame interception output (bi-planar 420f YUV, dropping late frames under load).
+        // Set initial hardware zoom to 1.0x user factor (wide lens)
+        setZoomFactor(1.0)
+
+        // Video frame output
         videoDataOutput.alwaysDiscardsLateVideoFrames = true
         videoDataOutput.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)
@@ -439,13 +458,21 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
             if let connection = videoDataOutput.connection(with: .video) {
                 applyLandscapeRotation(to: connection, interfaceOrientation: .landscapeRight)
                 if connection.isVideoStabilizationSupported {
-                    // Use .standard instead of .cinematicExtended to avoid large 4K frame lookahead buffers.
                     connection.preferredVideoStabilizationMode = .standard
                 }
             }
         }
 
-        // Optional audio capture output for synchronized audio in both output files.
+        // Photo capture output for high-res stills
+        if session.canAddOutput(photoOutput) {
+            photoOutput.isHighResolutionCaptureEnabled = true
+            if #available(iOS 13.0, *) {
+                photoOutput.maxPhotoQualityPrioritization = .balanced
+            }
+            session.addOutput(photoOutput)
+        }
+
+        // Optional audio capture output
         if includeAudio,
            let micDevice = AVCaptureDevice.default(for: .audio),
            let micInput = try? AVCaptureDeviceInput(device: micDevice),
@@ -500,13 +527,12 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
         AVEncoderBitRateKey: 128_000
     ]
 
-    // MARK: - Orientation Sync (Fluid Portrait & Landscape Capture)
+    // MARK: - Orientation Sync
 
     func updateInterfaceOrientation(_ orientation: UIInterfaceOrientation) {
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.processingQueue.async {
-                // Never rotate capture buffer geometry mid-recording.
                 guard !self.isRecordingRequested else { return }
                 if let connection = self.videoDataOutput.connection(with: .video) {
                     self.applyRotation(to: connection, interfaceOrientation: orientation)
@@ -546,29 +572,198 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
         applyRotation(to: connection, interfaceOrientation: interfaceOrientation)
     }
 
-    // MARK: - Real-Time Hardware Zoom
+    // MARK: - Zoom Control (0.5x Ultra-Wide to 10.0x Telephoto)
 
-    /// Adjusts `videoZoomFactor` safely during preview or active recording without interrupting capture.
-    func setZoomFactor(_ requestedFactor: CGFloat) {
-        let uiClamped = min(max(requestedFactor, minZoomFactor), maxZoomFactor)
-        if Thread.isMainThread {
-            self.zoomFactor = uiClamped
-        } else {
-            DispatchQueue.main.async { self.zoomFactor = uiClamped }
+    func setZoomFactor(_ requestedUserZoom: CGFloat) {
+        let clampedUserZoom = min(max(requestedUserZoom, minZoomFactor), maxZoomFactor)
+        DispatchQueue.main.async {
+            self.zoomFactor = clampedUserZoom
         }
 
         sessionQueue.async { [weak self] in
             guard let self, let device = self.videoDevice else { return }
+
+            // Convert user zoom to hardware zoom
+            let hardwareZoom: CGFloat
+            if self.wideBaseZoomMultiplier > 1.0 {
+                if clampedUserZoom <= 0.55 {
+                    hardwareZoom = 1.0 // Physical Ultra-Wide Lens
+                } else {
+                    hardwareZoom = clampedUserZoom * self.wideBaseZoomMultiplier
+                }
+            } else {
+                hardwareZoom = clampedUserZoom
+            }
+
             let hardwareMin = device.minAvailableVideoZoomFactor
-            let hardwareMax = min(self.maxAllowedZoom, device.maxAvailableVideoZoomFactor)
-            let clamped = min(max(requestedFactor, hardwareMin), hardwareMax)
+            let hardwareMax = device.maxAvailableVideoZoomFactor
+            let finalClamped = min(max(hardwareZoom, hardwareMin), hardwareMax)
 
             do {
                 try device.lockForConfiguration()
-                device.videoZoomFactor = clamped
+                device.videoZoomFactor = finalClamped
                 device.unlockForConfiguration()
             } catch {
-                self.publishStatus("Zoom adjustment error: \(error.localizedDescription)")
+                self.publishStatus("Zoom error: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - Exposure Control (Controle de Luz)
+
+    func setExposureBias(normalized: CGFloat) {
+        // normalized is 0.0 (darkest) to 1.0 (brightest), with 0.5 neutral (0.0 EV)
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.videoDevice else { return }
+            let minBias = device.minExposureTargetBias
+            let maxBias = device.maxExposureTargetBias
+
+            let targetBias: Float
+            if normalized < 0.5 {
+                targetBias = Float(1.0 - (normalized * 2.0)) * minBias
+            } else {
+                targetBias = Float((normalized - 0.5) * 2.0) * maxBias
+            }
+            let clamped = min(max(targetBias, minBias), maxBias)
+
+            do {
+                try device.lockForConfiguration()
+                device.setExposureTargetBias(clamped, completionHandler: nil)
+                device.unlockForConfiguration()
+                DispatchQueue.main.async {
+                    self.currentExposureBias = clamped
+                }
+            } catch {
+                self.publishStatus("Exposure error: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - Resolution & FPS Control (Alterar Qualidade)
+
+    func setResolutionPreset(_ preset: AVCaptureSession.Preset) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            guard !self.isRecording else {
+                self.publishStatus("Cannot change quality while recording.")
+                return
+            }
+            self.session.beginConfiguration()
+            if self.session.canSetSessionPreset(preset) {
+                self.session.sessionPreset = preset
+                let label: String
+                switch preset {
+                case .hd4K3840x2160: label = "4K UHD"
+                case .hd1920x1080: label = "1080p FHD"
+                case .hd1280x720: label = "720p HD"
+                default: label = "High"
+                }
+                DispatchQueue.main.async {
+                    self.sessionPreset = preset
+                    self.activeResolutionLabel = label
+                    self.statusMessage = "Qualidade: \(label)"
+                    self.autoClearStatusBanner()
+                }
+            }
+            self.session.commitConfiguration()
+        }
+    }
+
+    func setFrameRate(_ fps: Int32) {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.videoDevice else { return }
+            self.configureCameraHardwareDefaults(device, fps: fps)
+            DispatchQueue.main.async {
+                self.activeFPS = fps
+                self.statusMessage = "Taxa de quadros: \(fps) FPS"
+                self.autoClearStatusBanner()
+            }
+        }
+    }
+
+    // MARK: - Cinema Mode (24 FPS + Cinematic Stabilization)
+
+    func enableCinemaMode(_ enabled: Bool) {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.videoDevice else { return }
+            let targetFPS: Int32 = enabled ? 24 : 30
+            self.configureCameraHardwareDefaults(device, fps: targetFPS)
+
+            if let connection = self.videoDataOutput.connection(with: .video),
+               connection.isVideoStabilizationSupported {
+                if enabled {
+                    if #available(iOS 13.0, *) {
+                        connection.preferredVideoStabilizationMode = .cinematicExtended
+                    } else {
+                        connection.preferredVideoStabilizationMode = .cinematic
+                    }
+                } else {
+                    connection.preferredVideoStabilizationMode = .standard
+                }
+            }
+
+            DispatchQueue.main.async {
+                self.activeFPS = targetFPS
+                self.statusMessage = enabled ? "Modo Cinema Ativo (24 FPS)" : "Modo Vídeo (30 FPS)"
+                self.autoClearStatusBanner()
+            }
+        }
+    }
+
+    // MARK: - Camera Switching (Front / Back)
+
+    func switchCamera() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            guard !self.isRecording else {
+                self.publishStatus("Cannot flip camera while recording.")
+                return
+            }
+
+            self.session.beginConfiguration()
+            defer { self.session.commitConfiguration() }
+
+            if let currentInput = self.session.inputs.first(where: { ($0 as? AVCaptureDeviceInput)?.device.hasMediaType(.video) == true }) {
+                self.session.removeInput(currentInput)
+            }
+
+            let newPosition: AVCaptureDevice.Position = self.isFrontCamera ? .back : .front
+            let newDevice: AVCaptureDevice?
+            if newPosition == .front {
+                newDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+            } else {
+                let discovery = AVCaptureDevice.DiscoverySession(
+                    deviceTypes: [.builtInTripleCamera, .builtInDualWideCamera, .builtInWideAngleCamera],
+                    mediaType: .video,
+                    position: .back
+                )
+                newDevice = discovery.devices.first ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+            }
+
+            guard let device = newDevice, let newInput = try? AVCaptureDeviceInput(device: device), self.session.canAddInput(newInput) else {
+                self.publishStatus("Failed to switch camera.")
+                return
+            }
+
+            self.session.addInput(newInput)
+            self.videoDevice = device
+            self.configureCameraHardwareDefaults(device, fps: self.activeFPS)
+
+            let isFront = (newPosition == .front)
+            let isVirtual = (device.deviceType == .builtInTripleCamera || device.deviceType == .builtInDualWideCamera)
+            let switchFactors = device.virtualDeviceSwitchOverVideoZoomFactors
+            let baseMult: CGFloat = (isVirtual && !switchFactors.isEmpty) ? CGFloat(switchFactors[0].doubleValue) : (isVirtual ? 2.0 : 1.0)
+            self.wideBaseZoomMultiplier = baseMult
+
+            DispatchQueue.main.async {
+                self.isFrontCamera = isFront
+                self.minZoomFactor = (isFront || !isVirtual) ? 1.0 : 0.5
+                self.maxZoomFactor = isFront ? 3.0 : 10.0
+                self.zoomFactor = 1.0
+                self.isTorchAvailable = device.hasTorch && device.isTorchAvailable
+                self.minExposureBias = device.minExposureTargetBias
+                self.maxExposureBias = device.maxExposureTargetBias
+                self.currentExposureBias = 0.0
             }
         }
     }
@@ -592,6 +787,60 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
             } catch {
                 self.publishStatus("Torch error: \(error.localizedDescription)")
             }
+        }
+    }
+
+    // MARK: - Photo Capture (Foto Rápida e Modo FOTO)
+
+    func capturePhoto() {
+        guard session.isRunning else { return }
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let photoSettings = AVCapturePhotoSettings()
+            if #available(iOS 16.0, *) {
+                photoSettings.maxPhotoDimensions = CMVideoDimensions(width: 3840, height: 2160)
+            }
+            if let device = self.videoDevice, device.hasFlash && device.isFlashAvailable {
+                photoSettings.flashMode = self.isTorchOn ? .on : .auto
+            }
+            self.photoOutput.capturePhoto(with: photoSettings, delegate: self)
+        }
+    }
+
+    // MARK: - Gallery Thumbnail & Photos Access
+
+    func fetchLatestPhotoThumbnail() {
+        PHPhotoLibrary.requestAuthorization(for: .readWrite) { [weak self] status in
+            guard status == .authorized || status == .limited else { return }
+            let fetchOptions = PHFetchOptions()
+            fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            fetchOptions.fetchLimit = 1
+            let assets = PHAsset.fetchAssets(with: fetchOptions)
+            guard let latestAsset = assets.firstObject else { return }
+
+            let imageManager = PHImageManager.default()
+            let requestOptions = PHImageRequestOptions()
+            requestOptions.isSynchronous = false
+            requestOptions.deliveryMode = .highQualityFormat
+
+            imageManager.requestImage(
+                for: latestAsset,
+                targetSize: CGSize(width: 140, height: 140),
+                contentMode: .aspectFill,
+                options: requestOptions
+            ) { image, _ in
+                if let image {
+                    DispatchQueue.main.async {
+                        self?.latestThumbnail = image
+                    }
+                }
+            }
+        }
+    }
+
+    func openPhotosApp() {
+        if let url = URL(string: "photos-redirect://"), UIApplication.shared.canOpenURL(url) {
+            UIApplication.shared.open(url)
         }
     }
 
@@ -704,16 +953,16 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
                 }
             }, completionHandler: { [weak self] success, error in
                 guard let self else { return }
-                // Delete temporary sandbox .mp4 files immediately after PhotoKit imports them.
                 self.cleanupTempFiles(urls)
 
                 DispatchQueue.main.async {
                     self.isSaving = false
                     if success {
-                        self.statusMessage = "Saved 16:9 & 9:16 videos to Photos"
+                        self.statusMessage = "Vídeos 16:9 & 9:16 salvos no Fotos"
                         self.autoClearStatusBanner()
+                        self.fetchLatestPhotoThumbnail()
                     } else {
-                        self.statusMessage = "Save error: \(error?.localizedDescription ?? "Unknown")"
+                        self.statusMessage = "Erro ao salvar: \(error?.localizedDescription ?? "Desconhecido")"
                     }
                 }
             })
@@ -738,7 +987,6 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
             let state = ProcessInfo.processInfo.thermalState
             self.thermalState = state
 
-            // Proactively step frame rate down to 24 fps under serious/critical thermal pressure.
             let targetFPS: Int32 = (state == .serious || state == .critical) ? 24 : 30
             self.sessionQueue.async {
                 if let device = self.videoDevice {
@@ -750,7 +998,6 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
 
     // MARK: - Crop Geometry Helpers
 
-    /// Computes a centered crop rectangle aligned to 2-pixel boundaries (required for 4:2:0 YpCbCr chroma).
     static func centeredEvenCropRect(in sourceSize: CGSize, targetAspect: CGFloat) -> CGRect {
         let srcAspect = sourceSize.width / sourceSize.height
         let rawWidth: CGFloat
@@ -769,7 +1016,6 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
         let clampedWidth = min(evenWidth, CGFloat((Int(sourceSize.width) / 2) * 2))
         let clampedHeight = min(evenHeight, CGFloat((Int(sourceSize.height) / 2) * 2))
 
-        // Align origin to even pixel coordinates to avoid splitting 2x2 UV chroma blocks.
         let originX = CGFloat((Int((sourceSize.width - clampedWidth) / 2.0) / 2) * 2)
         let originY = CGFloat((Int((sourceSize.height - clampedHeight) / 2.0) / 2) * 2)
 
@@ -785,7 +1031,6 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
         let horizontalURL = tempDir.appendingPathComponent("DualCam_16x9_\(timestamp)_\(UUID().uuidString.prefix(6)).mp4")
         let verticalURL = tempDir.appendingPathComponent("DualCam_9x16_\(timestamp)_\(UUID().uuidString.prefix(6)).mp4")
 
-        // Scale target HEVC bitrate proportionally to pixel count (~3.4 bits/pixel/sec at 30fps -> ~28 Mbps for 4K 16:9).
         let hPixels = Int(horizontalRect.width * horizontalRect.height)
         let vPixels = Int(verticalRect.width * verticalRect.height)
         let hBitrate = max(6_000_000, Int(Double(hPixels) * 3.4))
@@ -815,7 +1060,7 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
 
     private func autoClearStatusBanner() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            guard let self, self.statusMessage == "Saved 16:9 & 9:16 videos to Photos" else { return }
+            guard let self, self.statusMessage != nil else { return }
             self.statusMessage = nil
         }
     }
@@ -829,7 +1074,6 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate, AVCapture
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        // Drain temporary CoreImage / CoreMedia bridged objects immediately at the end of every frame.
         autoreleasepool {
             guard isRecordingRequested, CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
@@ -849,7 +1093,6 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate, AVCapture
         let rawHeight = CVPixelBufferGetHeight(pixelBuffer)
         let frameSize = CGSize(width: rawWidth, height: rawHeight)
 
-        // Lazily initialize both AVAssetWriters using the exact incoming sensor buffer dimensions.
         if horizontalWriter == nil || verticalWriter == nil {
             do {
                 try initializeWritersForFrame(size: frameSize)
@@ -866,13 +1109,11 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate, AVCapture
 
         guard let hWriter = horizontalWriter, let vWriter = verticalWriter else { return }
 
-        // Compute centered 16:9 (Horizontal) and 9:16 (Vertical) crop rects.
         let horizontalCropRect = Self.centeredEvenCropRect(in: frameSize, targetAspect: 16.0 / 9.0)
         let verticalCropRect = Self.centeredEvenCropRect(in: frameSize, targetAspect: 9.0 / 16.0)
 
         let sourceCIImage = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: NSNull()])
 
-        // 1. Center-crop to 9:16 Vertical and encode via vertical AVAssetWriter.
         vWriter.appendVideo(
             sourceBuffer: pixelBuffer,
             sourceImage: sourceCIImage,
@@ -882,7 +1123,6 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate, AVCapture
             allowZeroCopyPassthrough: false
         )
 
-        // 2. Crop/passthrough to 16:9 Horizontal and encode via horizontal AVAssetWriter.
         hWriter.appendVideo(
             sourceBuffer: pixelBuffer,
             sourceImage: sourceCIImage,
@@ -892,7 +1132,6 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate, AVCapture
             allowZeroCopyPassthrough: true
         )
 
-        // Throttle elapsed recording duration updates to 1 Hz on the main thread.
         if let startPTS = recordingStartPTS {
             let elapsed = CMTimeGetSeconds(CMTimeSubtract(presentationTime, startPTS))
             let wholeSeconds = max(0, Int(elapsed))
@@ -906,7 +1145,6 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate, AVCapture
     }
 
     private func handleAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        // Only write audio once the first video frame has started the writer session.
         guard let hWriter = horizontalWriter,
               let vWriter = verticalWriter,
               hWriter.isSessionStarted,
@@ -914,5 +1152,61 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate, AVCapture
 
         hWriter.appendAudio(sampleBuffer)
         vWriter.appendAudio(sampleBuffer)
+    }
+}
+
+// MARK: - AVCapturePhotoCaptureDelegate (Photo Capture)
+
+extension CameraManager: AVCapturePhotoCaptureDelegate {
+    func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishProcessingPhoto photo: AVCapturePhoto,
+        error: Error?
+    ) {
+        if let error {
+            publishStatus("Photo error: \(error.localizedDescription)")
+            return
+        }
+
+        guard let data = photo.fileDataRepresentation(),
+              let originalImage = UIImage(data: data) else {
+            publishStatus("Failed to decode photo.")
+            return
+        }
+
+        let cropped16x9 = cropImageToAspect(originalImage, targetAspect: 16.0 / 9.0)
+        let cropped9x16 = cropImageToAspect(originalImage, targetAspect: 9.0 / 16.0)
+
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
+            guard let self else { return }
+            guard status == .authorized || status == .limited else {
+                self.publishStatus(CameraError.photoLibraryDenied.localizedDescription)
+                return
+            }
+
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetChangeRequest.creationRequestForAsset(from: cropped16x9)
+                PHAssetChangeRequest.creationRequestForAsset(from: cropped9x16)
+            }, completionHandler: { success, err in
+                DispatchQueue.main.async {
+                    if success {
+                        self.latestThumbnail = cropped9x16
+                        self.statusMessage = "Foto salva (16:9 e 9:16)"
+                        self.autoClearStatusBanner()
+                    } else if let err {
+                        self.statusMessage = "Erro ao salvar foto: \(err.localizedDescription)"
+                    }
+                }
+            })
+        }
+    }
+
+    private func cropImageToAspect(_ image: UIImage, targetAspect: CGFloat) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+        let rect = Self.centeredEvenCropRect(in: CGSize(width: width, height: height), targetAspect: targetAspect)
+        guard let croppedCg = cgImage.cropping(to: rect) else { return image }
+        return UIImage(cgImage: croppedCg, scale: image.scale, orientation: image.imageOrientation)
     }
 }

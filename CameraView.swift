@@ -1,4 +1,5 @@
 import AVFoundation
+import Photos
 import SwiftUI
 import UIKit
 
@@ -92,6 +93,7 @@ final class PreviewContainerView: UIView {
 struct AdaptiveCropGuides: View {
     let isLandscape: Bool
     let isRecording: Bool
+    let isCinemaMode: Bool
     let showGrid: Bool
 
     var body: some View {
@@ -126,7 +128,7 @@ struct AdaptiveCropGuides: View {
                     // Centered 9:16 Frame
                     Rectangle()
                         .strokeBorder(
-                            Color.white.opacity(isRecording ? 0.75 : 0.35),
+                            Color.white.opacity(isRecording ? 0.85 : 0.35),
                             style: StrokeStyle(lineWidth: 1.0, dash: [4, 4])
                         )
                         .frame(width: verticalCropRect.width, height: verticalCropRect.height)
@@ -155,14 +157,13 @@ struct AdaptiveCropGuides: View {
                             .position(x: verticalCropRect.midX, y: verticalCropRect.midY)
                     }
 
-                    // 9:16 Badge
-                    Text("9:16 SAFE ZONE")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .padding(.horizontal, 8)
+                    // Top Safe Zone Tag
+                    Text("9:16")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Color.white.opacity(0.08), in: Capsule())
-                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.7))
+                        .background(Color.white.opacity(0.10), in: Capsule())
                         .position(x: verticalCropRect.midX, y: verticalCropRect.minY + 24)
                 }
             } else {
@@ -193,7 +194,7 @@ struct AdaptiveCropGuides: View {
                     // Centered 16:9 Frame
                     Rectangle()
                         .strokeBorder(
-                            Color.white.opacity(isRecording ? 0.75 : 0.35),
+                            Color.white.opacity(isRecording ? 0.85 : 0.35),
                             style: StrokeStyle(lineWidth: 1.0, dash: [4, 4])
                         )
                         .frame(width: horizontalCropRect.width, height: horizontalCropRect.height)
@@ -222,14 +223,13 @@ struct AdaptiveCropGuides: View {
                             .position(x: horizontalCropRect.midX, y: horizontalCropRect.midY)
                     }
 
-                    // 16:9 Badge
-                    Text("16:9 CROP")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .padding(.horizontal, 8)
+                    // 16:9 Tag
+                    Text("16:9")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Color.white.opacity(0.08), in: Capsule())
-                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.7))
+                        .background(Color.white.opacity(0.10), in: Capsule())
                         .position(x: horizontalCropRect.midX, y: horizontalCropRect.minY + 20)
                 }
             }
@@ -333,13 +333,12 @@ struct CameraView: View {
     @State private var exposureValue: CGFloat = 0.5
     @State private var isAdjustingExposure: Bool = false
     @State private var activeMode: CameraCaptureMode = .video
-    @State private var uiRotationAngle: Double = 0.0
-    @State private var isLandscape: Bool = false
+    @State private var isFlashing: Bool = false
 
     var body: some View {
         GeometryReader { proxy in
             let safeInsets = proxy.safeAreaInsets
-            let isCurrentLandscape = proxy.size.width > proxy.size.height
+            let isLandscape = proxy.size.width > proxy.size.height
 
             ZStack {
                 Color.black.ignoresSafeArea()
@@ -351,36 +350,49 @@ struct CameraView: View {
 
                 // 2. Adaptive Crop Guides (Landscape vs Portrait)
                 AdaptiveCropGuides(
-                    isLandscape: isCurrentLandscape,
+                    isLandscape: isLandscape,
                     isRecording: cameraManager.isRecording,
+                    isCinemaMode: (activeMode == .cine),
                     showGrid: showGrid
                 )
                 .ignoresSafeArea()
 
-                // 3. Ultra-Thin Lateral Exposure Slider (Right Edge)
+                // 3. Shutter Flash Animation Effect
+                if isFlashing {
+                    Color.white.opacity(0.85)
+                        .ignoresSafeArea()
+                        .transition(.opacity)
+                }
+
+                // 4. Ultra-Thin Lateral Exposure Slider
                 lateralExposureSlider(screenHeight: proxy.size.height)
-                    .position(x: proxy.size.width - 16, y: proxy.size.height / 2.0)
+                    .position(
+                        x: isLandscape ? proxy.size.width - max(28, safeInsets.trailing + 12) : proxy.size.width - 18,
+                        y: proxy.size.height / 2.0
+                    )
 
-                // 4. Main Responsive UI Layout
-                VStack(spacing: 0) {
-                    // Top Settings / Status Bar (Always at Physical Top)
-                    topSettingsBar
-                        .padding(.top, max(8, safeInsets.top))
-                        .padding(.horizontal, 16)
+                // 5. Main Responsive UI Layout
+                if isLandscape {
+                    landscapeLayout(proxy: proxy, safeInsets: safeInsets)
+                } else {
+                    portraitLayout(proxy: proxy, safeInsets: safeInsets)
+                }
 
-                    Spacer()
-
-                    // Floating Zoom Pill (Lower-Left Thumb Zone)
-                    HStack {
-                        floatingZoomControl
-                            .padding(.leading, max(16, safeInsets.leading))
-                            .padding(.bottom, 12)
+                // 6. Status Banner Toast
+                if let status = cameraManager.statusMessage {
+                    VStack {
                         Spacer()
+                        Text(status)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Color.black.opacity(0.75), in: Capsule())
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8))
+                            .padding(.bottom, isLandscape ? 20 : max(100, safeInsets.bottom + 80))
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
-
-                    // Main Control Dock (Bottom Action Carousel, Shutter, Gallery, Quick Photo)
-                    bottomControlDock
-                        .padding(.bottom, max(14, safeInsets.bottom))
+                    .animation(.easeInOut(duration: 0.25), value: cameraManager.statusMessage)
                 }
             }
         }
@@ -388,35 +400,69 @@ struct CameraView: View {
         .onAppear {
             cameraManager.start()
             startAudioVUSimulation()
-            listenToOrientationChanges()
         }
         .onDisappear {
             cameraManager.stop()
         }
+        .onChange(of: activeMode) { newMode in
+            cameraManager.enableCinemaMode(newMode == .cine)
+        }
     }
 
-    // MARK: - Fluid UI Rotation Tracking
+    // MARK: - Portrait Layout
 
-    private func listenToOrientationChanges() {
-        NotificationCenter.default.addObserver(
-            forName: UIDevice.orientationDidChangeNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            let deviceOrientation = UIDevice.current.orientation
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
-                switch deviceOrientation {
-                case .portrait:
-                    uiRotationAngle = 0.0
-                case .landscapeLeft:
-                    uiRotationAngle = 90.0
-                case .landscapeRight:
-                    uiRotationAngle = -90.0
-                case .portraitUpsideDown:
-                    uiRotationAngle = 180.0
-                default:
-                    break
-                }
+    private func portraitLayout(proxy: GeometryProxy, safeInsets: EdgeInsets) -> some View {
+        VStack(spacing: 0) {
+            // Top Settings Bar
+            topSettingsBar
+                .padding(.top, max(12, safeInsets.top))
+                .padding(.horizontal, 16)
+
+            Spacer()
+
+            // Floating Zoom Pill
+            HStack {
+                floatingZoomControl
+                    .padding(.leading, max(16, safeInsets.leading))
+                    .padding(.bottom, 12)
+                Spacer()
+            }
+
+            // Bottom Control Dock
+            bottomControlDock
+                .padding(.bottom, max(14, safeInsets.bottom))
+        }
+    }
+
+    // MARK: - Landscape Layout (Dock on Right side for thumb ergonomics)
+
+    private func landscapeLayout(proxy: GeometryProxy, safeInsets: EdgeInsets) -> some View {
+        HStack(spacing: 0) {
+            // Left Zone: Zoom Control + Safe Margins
+            VStack {
+                Spacer()
+                floatingZoomControl
+                    .padding(.leading, max(20, safeInsets.leading))
+                    .padding(.bottom, max(16, safeInsets.bottom))
+            }
+
+            Spacer()
+
+            // Center: Top Settings Bar anchored at the physical top
+            VStack {
+                topSettingsBar
+                    .padding(.top, max(10, safeInsets.top))
+                Spacer()
+            }
+
+            Spacer()
+
+            // Right Zone: Shutter, Carousel, Gallery Dock
+            VStack(spacing: 16) {
+                Spacer()
+                landscapeControlDock
+                    .padding(.trailing, max(20, safeInsets.trailing))
+                Spacer()
             }
         }
     }
@@ -439,21 +485,57 @@ struct CameraView: View {
 
     // MARK: - Top Settings Bar (Quality Dropdown, Mic VU, Toggles)
 
-    private var qualityDropdownPill: some View {
-        HStack(spacing: 4) {
-            Text("\(cameraManager.activeResolutionLabel) · 30FPS")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white)
+    private var qualityDropdownMenu: some View {
+        Menu {
+            Section("Resolução") {
+                Button {
+                    cameraManager.setResolutionPreset(.hd4K3840x2160)
+                } label: {
+                    Label("4K UHD (3840×2160)", systemImage: cameraManager.sessionPreset == .hd4K3840x2160 ? "checkmark" : "")
+                }
+                Button {
+                    cameraManager.setResolutionPreset(.hd1920x1080)
+                } label: {
+                    Label("1080p FHD (1920×1080)", systemImage: cameraManager.sessionPreset == .hd1920x1080 ? "checkmark" : "")
+                }
+                Button {
+                    cameraManager.setResolutionPreset(.hd1280x720)
+                } label: {
+                    Label("720p HD (1280×720)", systemImage: cameraManager.sessionPreset == .hd1280x720 ? "checkmark" : "")
+                }
+            }
 
-            Image(systemName: "chevron.down")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.6))
+            Section("Taxa de Quadros (FPS)") {
+                Button {
+                    cameraManager.setFrameRate(60)
+                } label: {
+                    Label("60 FPS (Ultra Fluido)", systemImage: cameraManager.activeFPS == 60 ? "checkmark" : "")
+                }
+                Button {
+                    cameraManager.setFrameRate(30)
+                } label: {
+                    Label("30 FPS (Padrão)", systemImage: cameraManager.activeFPS == 30 ? "checkmark" : "")
+                }
+                Button {
+                    cameraManager.setFrameRate(24)
+                } label: {
+                    Label("24 FPS (Cinema)", systemImage: cameraManager.activeFPS == 24 ? "checkmark" : "")
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("\(cameraManager.activeResolutionLabel) · \(cameraManager.activeFPS)FPS")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Color.white.opacity(0.10), in: Capsule())
         }
-        .rotationEffect(.degrees(uiRotationAngle))
-        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Color.white.opacity(0.08), in: Capsule())
     }
 
     @ViewBuilder
@@ -461,7 +543,7 @@ struct CameraView: View {
         if cameraManager.isRecording {
             HStack(spacing: 5) {
                 Circle()
-                    .fill(Color.white)
+                    .fill(Color.red)
                     .frame(width: 6, height: 6)
                     .opacity(isPulseAnimating ? 0.3 : 1.0)
                     .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulseAnimating)
@@ -472,14 +554,10 @@ struct CameraView: View {
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
             }
-            .rotationEffect(.degrees(uiRotationAngle))
-            .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
-        } else {
-            Text("DUAL 16:9 + 9:16")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.65))
-                .rotationEffect(.degrees(uiRotationAngle))
-                .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.red.opacity(0.20), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.red.opacity(0.4), lineWidth: 0.8))
         }
     }
 
@@ -499,12 +577,13 @@ struct CameraView: View {
                 }
             }
         }
-        .rotationEffect(.degrees(uiRotationAngle))
-        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
     }
 
     private var topTogglesGroup: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
+            // Grid Toggle
             Button {
                 hapticFeedback(.light)
                 withAnimation(.easeInOut(duration: 0.15)) { showGrid.toggle() }
@@ -516,6 +595,7 @@ struct CameraView: View {
                     .frame(width: 24, height: 24)
             }
 
+            // Torch Toggle
             if cameraManager.isTorchAvailable {
                 Button {
                     hapticFeedback(.light)
@@ -523,21 +603,34 @@ struct CameraView: View {
                 } label: {
                     Image(systemName: cameraManager.isTorchOn ? "bolt.fill" : "bolt.slash.fill")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(cameraManager.isTorchOn ? .yellow : .white)
                         .opacity(cameraManager.isTorchOn ? 1.0 : 0.4)
                         .frame(width: 24, height: 24)
                 }
             }
+
+            // Camera Switch (Front/Back)
+            Button {
+                hapticFeedback(.medium)
+                cameraManager.switchCamera()
+            } label: {
+                Image(systemName: "arrow.triangle.2.circlepath.camera")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .frame(width: 24, height: 24)
+            }
         }
-        .rotationEffect(.degrees(uiRotationAngle))
-        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
     }
 
     private var topSettingsBar: some View {
         HStack(spacing: 8) {
-            qualityDropdownPill
-            dividerLine
-            recordingStatusPill
+            qualityDropdownMenu
+
+            if cameraManager.isRecording {
+                dividerLine
+                recordingStatusPill
+            }
+
             dividerLine
             audioVUMeterPill
             dividerLine
@@ -546,12 +639,12 @@ struct CameraView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(
-            Color.white.opacity(0.04)
+            Color.white.opacity(0.05)
                 .background(.ultraThinMaterial)
         )
         .clipShape(Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8))
-        .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
         .environment(\.colorScheme, .dark)
     }
 
@@ -561,28 +654,38 @@ struct CameraView: View {
             .frame(width: 1, height: 12)
     }
 
-    // MARK: - Ultra-Thin Lateral Exposure Slider (2px, expands on touch)
+    // MARK: - Ultra-Thin Lateral Exposure Slider (Controle de Luz)
 
     private func lateralExposureSlider(screenHeight: CGFloat) -> some View {
-        VStack {
+        HStack(spacing: 4) {
+            // EV Readout while dragging
+            if isAdjustingExposure {
+                Text(String(format: "%+.1f EV", cameraManager.currentExposureBias))
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.75), in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.7))
+                    .transition(.opacity)
+            }
+
             ZStack(alignment: .top) {
-                // Track: 2px thickness with 10% opacity at rest; 4px on touch
+                // Track: 2px thickness with 12% opacity at rest; 4px on touch
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.white.opacity(isAdjustingExposure ? 0.85 : 0.10))
+                    .fill(Color.white.opacity(isAdjustingExposure ? 0.85 : 0.12))
                     .frame(width: isAdjustingExposure ? 4 : 2, height: 160)
                     .animation(.easeInOut(duration: 0.2), value: isAdjustingExposure)
 
-                // Sun Indicator Thumb (Rotates on its own axis)
+                // Sun Indicator Thumb
                 Circle()
-                    .fill(Color.white.opacity(0.15))
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
+                    .fill(Color.white.opacity(0.18))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 1))
                     .frame(width: 24, height: 24)
                     .overlay(
                         Image(systemName: "sun.max.fill")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(.white)
-                            .rotationEffect(.degrees(uiRotationAngle))
-                            .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
                     )
                     .offset(y: (1.0 - exposureValue) * 136)
             }
@@ -592,18 +695,19 @@ struct CameraView: View {
                         isAdjustingExposure = true
                         let clamped = min(max(1.0 - (value.location.y / 160.0), 0.0), 1.0)
                         exposureValue = clamped
+                        cameraManager.setExposureBias(normalized: clamped)
                     }
                     .onEnded { _ in
-                        withAnimation(.easeOut(duration: 0.4)) {
+                        withAnimation(.easeOut(duration: 0.35)) {
                             isAdjustingExposure = false
                         }
                     }
             )
         }
-        .frame(width: 36, height: 180)
+        .frame(height: 180)
     }
 
-    // MARK: - Floating Expanding Zoom Control (Discreet 1.0x Pill)
+    // MARK: - Floating Expanding Zoom Control (0.5x Ultra-Wide to 5x)
 
     private var floatingZoomControl: some View {
         HStack(spacing: 4) {
@@ -616,16 +720,15 @@ struct CameraView: View {
                 Text(String(format: "%.1f×", cameraManager.zoomFactor))
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white)
-                    .rotationEffect(.degrees(uiRotationAngle))
-                    .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
-                    .frame(width: 34, height: 34)
-                    .background(Color.white.opacity(0.10), in: Circle())
+                    .frame(width: 36, height: 36)
+                    .background(Color.white.opacity(0.12), in: Circle())
             }
 
             if isZoomExpanded {
                 HStack(spacing: 3) {
-                    ForEach([0.5, 1.0, 2.0, 3.0, 5.0], id: \.self) { preset in
-                        let isSelected = abs(cameraManager.zoomFactor - preset) < 0.12
+                    let presets: [CGFloat] = cameraManager.isUltraWideAvailable ? [0.5, 1.0, 2.0, 3.0, 5.0] : [1.0, 2.0, 3.0, 5.0]
+                    ForEach(presets, id: \.self) { preset in
+                        let isSelected = abs(cameraManager.zoomFactor - preset) < 0.15
                         Button {
                             hapticFeedback(.light)
                             withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) {
@@ -635,10 +738,8 @@ struct CameraView: View {
                         } label: {
                             Text(preset == 0.5 ? ".5" : String(format: "%.0f", preset))
                                 .font(.system(size: 10, weight: isSelected ? .bold : .medium, design: .monospaced))
-                                .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.7))
-                                .rotationEffect(.degrees(uiRotationAngle))
-                                .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
-                                .frame(width: 26, height: 26)
+                                .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.8))
+                                .frame(width: 28, height: 28)
                                 .background(isSelected ? Color.white : Color.clear, in: Circle())
                         }
                     }
@@ -649,120 +750,199 @@ struct CameraView: View {
         }
         .padding(3)
         .background(
-            Color.white.opacity(0.05)
+            Color.white.opacity(0.06)
                 .background(.ultraThinMaterial)
         )
         .clipShape(Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
         .environment(\.colorScheme, .dark)
     }
 
-    // MARK: - Bottom Control Dock (Carousel, Shutter, Quick Photo, Gallery)
+    // MARK: - Mode Carousel (FOTO | VÍDEO | CINE)
+
+    private var modeCarousel: some View {
+        HStack(spacing: 22) {
+            ForEach(CameraCaptureMode.allCases, id: \.self) { mode in
+                let isSelected = activeMode == mode
+                Button {
+                    hapticFeedback(.light)
+                    withAnimation(.easeInOut(duration: 0.2)) { activeMode = mode }
+                } label: {
+                    VStack(spacing: 3) {
+                        Text(mode.rawValue)
+                            .font(.system(size: 11, weight: isSelected ? .bold : .medium, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .opacity(isSelected ? 1.0 : 0.4)
+
+                        Circle()
+                            .fill(isSelected ? Color.white : Color.clear)
+                            .frame(width: 3.5, height: 3.5)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Bottom Control Dock (Portrait)
 
     private var bottomControlDock: some View {
-        VStack(spacing: 12) {
-            // Mode Carousel: "FOTO | VÍDEO | CINE" with active dot
-            HStack(spacing: 24) {
+        VStack(spacing: 14) {
+            // Mode Carousel
+            modeCarousel
+
+            // Capture Triad: [Gallery] - [Shutter REC/Photo] - [Quick Photo / Flip]
+            HStack {
+                // 1. Gallery Thumbnail
+                galleryButton
+
+                Spacer()
+
+                // 2. Main Shutter Button
+                mainShutterButton
+
+                Spacer()
+
+                // 3. Quick Photo Button
+                quickPhotoButton
+            }
+            .frame(maxWidth: 320)
+        }
+    }
+
+    // MARK: - Landscape Control Dock (Right side)
+
+    private var landscapeControlDock: some View {
+        VStack(spacing: 16) {
+            // Mode Carousel (compact vertical stack)
+            VStack(spacing: 10) {
                 ForEach(CameraCaptureMode.allCases, id: \.self) { mode in
                     let isSelected = activeMode == mode
                     Button {
                         hapticFeedback(.light)
                         withAnimation(.easeInOut(duration: 0.2)) { activeMode = mode }
                     } label: {
-                        VStack(spacing: 4) {
-                            Text(mode.rawValue)
-                                .font(.system(size: 11, weight: isSelected ? .bold : .medium, design: .monospaced))
-                                .foregroundStyle(.white)
-                                .opacity(isSelected ? 1.0 : 0.4)
-                                .rotationEffect(.degrees(uiRotationAngle))
-                                .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
-
-                            Circle()
-                                .fill(isSelected ? Color.white : Color.clear)
-                                .frame(width: 3.5, height: 3.5)
-                        }
-                    }
-                }
-            }
-
-            // Capture Triad: [Gallery] - [Shutter REC] - [Quick Photo]
-            HStack {
-                // 1. Gallery Thumbnail (Symmetrical)
-                Button {
-                    hapticFeedback(.light)
-                } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
-                            .frame(width: 44, height: 44)
-                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
-
-                        Image(systemName: "photo.on.rectangle.angled")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .rotationEffect(.degrees(uiRotationAngle))
-                            .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
-                    }
-                }
-
-                Spacer()
-
-                // 2. Large Clean Shutter Button (72pt)
-                Button {
-                    hapticFeedback(.medium)
-                    cameraManager.toggleRecording()
-                } label: {
-                    ZStack {
-                        Circle()
-                            .strokeBorder(Color.white.opacity(0.85), lineWidth: 3)
-                            .frame(width: 72, height: 72)
-
-                        if cameraManager.isSaving {
-                            ProgressView().tint(.white)
-                        } else {
-                            RoundedRectangle(
-                                cornerRadius: cameraManager.isRecording ? 6 : 28,
-                                style: .continuous
-                            )
-                            .fill(Color.white)
-                            .frame(
-                                width: cameraManager.isRecording ? 28 : 56,
-                                height: cameraManager.isRecording ? 28 : 56
-                            )
-                            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: cameraManager.isRecording)
-
-                            if cameraManager.isRecording {
-                                Circle()
-                                    .stroke(Color.white.opacity(0.3), lineWidth: 1.5)
-                                    .frame(width: 78, height: 78)
-                            }
-                        }
-                    }
-                }
-                .disabled(!cameraManager.isSessionRunning || cameraManager.isSaving)
-
-                Spacer()
-
-                // 3. Quick Photo Button (Secondary Snapshot)
-                Button {
-                    hapticFeedback(.light)
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Color.white.opacity(0.08))
-                            .frame(width: 44, height: 44)
-                            .overlay(Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
-
-                        Image(systemName: "camera.fill")
-                            .font(.system(size: 15))
+                        Text(mode.rawValue)
+                            .font(.system(size: 10, weight: isSelected ? .bold : .medium, design: .monospaced))
                             .foregroundStyle(.white)
-                            .rotationEffect(.degrees(uiRotationAngle))
-                            .animation(.spring(response: 0.45, dampingFraction: 0.75), value: uiRotationAngle)
+                            .opacity(isSelected ? 1.0 : 0.4)
                     }
                 }
             }
-            .frame(maxWidth: 320)
+
+            // Main Shutter
+            mainShutterButton
+
+            // Bottom row: Gallery & Quick Photo
+            HStack(spacing: 14) {
+                galleryButton
+                quickPhotoButton
+            }
         }
+    }
+
+    // MARK: - Gallery Button
+
+    private var galleryButton: some View {
+        Button {
+            hapticFeedback(.light)
+            cameraManager.openPhotosApp()
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+                    .frame(width: 44, height: 44)
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
+
+                if let thumbnail = cameraManager.latestThumbnail {
+                    Image(uiImage: thumbnail)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 42, height: 42)
+                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                } else {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+            }
+        }
+    }
+
+    // MARK: - Main Shutter Button (Photo vs Video vs Cine)
+
+    private var mainShutterButton: some View {
+        Button {
+            if activeMode == .foto {
+                triggerPhotoCapture()
+            } else {
+                hapticFeedback(.medium)
+                cameraManager.toggleRecording()
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.85), lineWidth: 3)
+                    .frame(width: 72, height: 72)
+
+                if cameraManager.isSaving {
+                    ProgressView().tint(.white)
+                } else if activeMode == .foto {
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 58, height: 58)
+                } else {
+                    RoundedRectangle(
+                        cornerRadius: cameraManager.isRecording ? 6 : 28,
+                        style: .continuous
+                    )
+                    .fill(cameraManager.isRecording ? Color.red : Color.white)
+                    .frame(
+                        width: cameraManager.isRecording ? 28 : 56,
+                        height: cameraManager.isRecording ? 28 : 56
+                    )
+                    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: cameraManager.isRecording)
+
+                    if cameraManager.isRecording {
+                        Circle()
+                            .stroke(Color.white.opacity(0.35), lineWidth: 1.5)
+                            .frame(width: 78, height: 78)
+                    }
+                }
+            }
+        }
+        .disabled(!cameraManager.isSessionRunning || cameraManager.isSaving)
+    }
+
+    // MARK: - Quick Photo Button
+
+    private var quickPhotoButton: some View {
+        Button {
+            triggerPhotoCapture()
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(width: 44, height: 44)
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
+
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white)
+            }
+        }
+    }
+
+    private func triggerPhotoCapture() {
+        hapticFeedback(.heavy)
+        withAnimation(.easeIn(duration: 0.08)) {
+            isFlashing = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                isFlashing = false
+            }
+        }
+        cameraManager.capturePhoto()
     }
 
     // MARK: - Helpers

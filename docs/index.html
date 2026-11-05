@@ -20,54 +20,74 @@
       user-select: none;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
-    .rotate-smooth {
-      transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1);
-    }
     .crop-border-dashed {
       border-style: dashed;
       border-width: 1px;
+    }
+    .flash-anim {
+      animation: flashEffect 0.25s ease-out;
+    }
+    @keyframes flashEffect {
+      0% { opacity: 0.9; }
+      100% { opacity: 0; }
     }
   </style>
 </head>
 <body class="bg-black text-white h-screen w-screen relative overflow-hidden select-none">
 
   <!-- FEED REAL DA CÂMERA -->
-  <video id="cameraFeed" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover z-0"></video>
+  <video id="cameraFeed" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover z-0 transition-transform duration-300"></video>
+  <canvas id="photoCanvas" class="hidden"></canvas>
+  <div id="flashOverlay" class="absolute inset-0 bg-white pointer-events-none opacity-0 z-40"></div>
 
   <!-- OVERLAY DE GUIAS ADAPTATIVAS (16:9 + 9:16) -->
-  <div id="cropGuidesContainer" class="absolute inset-0 pointer-events-none z-10 flex flex-col items-center justify-center">
-    <!-- Será atualizado via JS dependendo da orientação -->
-  </div>
+  <div id="cropGuidesContainer" class="absolute inset-0 pointer-events-none z-10 flex flex-col items-center justify-center"></div>
 
-  <!-- SLIDER LATERAL DE EXPOSIÇÃO ULTRA-FINO (2px) -->
-  <div id="exposureContainer" class="absolute right-4 top-1/2 -translate-y-1/2 z-30 flex items-center py-6 px-2 cursor-pointer pointer-events-auto">
-    <div class="relative h-40 flex items-center justify-center">
-      <div id="exposureTrack" class="w-[2px] bg-white opacity-10 rounded-full h-full transition-all duration-300"></div>
-      <div id="exposureThumb" class="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 p-1.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 opacity-30 scale-75 transition-all">
-        <i data-lucide="sun" class="w-3 h-3 text-white rotate-smooth icon-rotate"></i>
+  <!-- SLIDER LATERAL DE CONTROLE DE LUZ (2px, interativo) -->
+  <div id="exposureContainer" class="absolute right-4 top-1/2 -translate-y-1/2 z-30 flex items-center py-6 px-3 cursor-pointer pointer-events-auto touch-none">
+    <div class="relative h-44 flex items-center justify-center">
+      <div id="evLabel" class="absolute right-8 text-[9px] font-mono font-bold bg-black/80 px-1.5 py-0.5 rounded-full border border-white/20 opacity-0 transition-opacity whitespace-nowrap">0.0 EV</div>
+      <div id="exposureTrack" class="w-[2px] bg-white opacity-15 rounded-full h-full transition-all duration-200"></div>
+      <div id="exposureThumb" class="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 p-1.5 rounded-full bg-white/20 backdrop-blur-xl border border-white/30 opacity-70 scale-90 transition-transform">
+        <i data-lucide="sun" class="w-3.5 h-3.5 text-white"></i>
       </div>
     </div>
   </div>
 
-  <!-- PAINEL SUPERIOR CONSOLIDADO (DROPDOWN, VU METER, TOGGLES) -->
+  <!-- PAINEL SUPERIOR CONSOLIDADO (DROPDOWN DE QUALIDADE, VU METER, TOGGLES) -->
   <header class="absolute top-4 inset-x-0 mx-auto w-fit z-30 pointer-events-auto">
-    <div class="flex items-center gap-3 px-3.5 py-1.5 rounded-full bg-white/[0.05] backdrop-blur-2xl border border-white/10 shadow-2xl">
-      <button class="flex items-center gap-1.5 text-[10px] font-mono font-medium tracking-tight text-white/90">
-        <span class="rotate-smooth icon-rotate">4K UHD · 30FPS</span>
-        <i data-lucide="chevron-down" class="w-3 h-3 opacity-60 rotate-smooth icon-rotate"></i>
-      </button>
+    <div class="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-white/[0.06] backdrop-blur-2xl border border-white/10 shadow-2xl">
+      <!-- Seletor de Qualidade -->
+      <div class="relative">
+        <button id="btnQuality" class="flex items-center gap-1.5 text-[10px] font-mono font-bold tracking-tight text-white/90 px-2 py-0.5 rounded-full bg-white/10">
+          <span id="qualityLabel">4K UHD · 30FPS</span>
+          <i data-lucide="chevron-down" class="w-3 h-3 opacity-60"></i>
+        </button>
+        <!-- Dropdown Menu -->
+        <div id="qualityMenu" class="hidden absolute top-8 left-0 w-36 bg-neutral-900/95 backdrop-blur-xl border border-white/15 rounded-xl p-1 shadow-2xl z-50 text-[10px] font-mono">
+          <div class="px-2 py-1 text-white/40 text-[9px] uppercase font-bold">Resolução</div>
+          <button data-res="4K" class="quality-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white font-bold flex justify-between">4K UHD <span>✓</span></button>
+          <button data-res="1080p" class="quality-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white/80 flex justify-between">1080p FHD <span></span></button>
+          <button data-res="720p" class="quality-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white/80 flex justify-between">720p HD <span></span></button>
+          <div class="h-[1px] bg-white/10 my-1"></div>
+          <div class="px-2 py-1 text-white/40 text-[9px] uppercase font-bold">Taxa (FPS)</div>
+          <button data-fps="60" class="fps-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white/80 flex justify-between">60 FPS <span></span></button>
+          <button data-fps="30" class="fps-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white font-bold flex justify-between">30 FPS <span>✓</span></button>
+          <button data-fps="24" class="fps-item w-full text-left px-2 py-1.5 rounded hover:bg-white/10 text-white/80 flex justify-between">24 FPS (Cine) <span></span></button>
+        </div>
+      </div>
 
-      <div class="w-[1px] h-3 bg-white/15"></div>
-
-      <div id="statusBadge" class="flex items-center gap-1 text-[10px] font-mono text-white/70">
-        <span class="rotate-smooth icon-rotate">DUAL 16:9 + 9:16</span>
+      <!-- Timer quando gravando (oculto em repouso) -->
+      <div id="recordingTimerBadge" class="hidden items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-[10px] font-mono font-bold text-white">
+        <div class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
+        <span id="timecodeTop">00:00</span>
       </div>
 
       <div class="w-[1px] h-3 bg-white/15"></div>
 
       <!-- Microfone & VU Meter Real -->
       <div class="flex items-center gap-1.5">
-        <i data-lucide="mic" class="w-3 h-3 text-white/80 rotate-smooth icon-rotate"></i>
+        <i data-lucide="mic" class="w-3 h-3 text-white/80"></i>
         <div class="flex items-end gap-[1.5px] h-2.5 w-2.5">
           <div id="vu1" class="w-[2px] bg-white rounded-full h-[33%] opacity-100 transition-all duration-75"></div>
           <div id="vu2" class="w-[2px] bg-white rounded-full h-[66%] opacity-30 transition-all duration-75"></div>
@@ -77,59 +97,52 @@
 
       <div class="w-[1px] h-3 bg-white/15"></div>
 
-      <!-- Toggles: Grade e Lanterna -->
+      <!-- Toggles: Grade, Lanterna, Trocar Câmera -->
       <div class="flex items-center gap-2">
-        <button id="btnGrid" class="p-1 rounded-full text-white opacity-100 hover:opacity-100 transition-opacity">
-          <i data-lucide="grid-3x3" class="w-3 h-3 rotate-smooth icon-rotate"></i>
+        <button id="btnGrid" class="p-1 rounded-full text-white opacity-100 hover:opacity-100 transition-opacity" title="Grade">
+          <i data-lucide="grid-3x3" class="w-3.5 h-3.5"></i>
         </button>
-        <button id="btnTorch" class="p-1 rounded-full text-white opacity-40 hover:opacity-100 transition-opacity">
-          <i data-lucide="flashlight" class="w-3 h-3 rotate-smooth icon-rotate"></i>
+        <button id="btnTorch" class="p-1 rounded-full text-white opacity-40 hover:opacity-100 transition-opacity" title="Lanterna">
+          <i data-lucide="flashlight" class="w-3.5 h-3.5"></i>
+        </button>
+        <button id="btnFlip" class="p-1 rounded-full text-white opacity-80 hover:opacity-100 transition-opacity" title="Trocar Câmera">
+          <i data-lucide="switch-camera" class="w-3.5 h-3.5"></i>
         </button>
       </div>
     </div>
   </header>
 
-  <!-- PÍLULA DE ZOOM DISCRETA (POLEGAR INFERIOR ESQUERDO) -->
+  <!-- PÍLULA DE ZOOM DISCRETA (0.5x Ultra-Wide a 5x) -->
   <aside class="absolute bottom-24 left-6 z-30 pointer-events-auto">
-    <div class="flex items-center rounded-full bg-white/[0.05] backdrop-blur-2xl border border-white/10 p-1 shadow-2xl transition-all">
-      <button id="btnZoomToggle" class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
-        <span id="zoomLabel" class="font-mono text-[10px] font-semibold text-white rotate-smooth icon-rotate">1.0×</span>
+    <div class="flex items-center rounded-full bg-white/[0.06] backdrop-blur-2xl border border-white/10 p-1 shadow-2xl transition-all">
+      <button id="btnZoomToggle" class="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
+        <span id="zoomLabel" class="font-mono text-[10px] font-semibold text-white">1.0×</span>
       </button>
 
       <div id="zoomPresets" class="flex items-center gap-1 max-w-0 opacity-0 overflow-hidden transition-all duration-300">
-        <button data-zoom="0.5" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">
-          <span class="rotate-smooth icon-rotate">.5</span>
-        </button>
-        <button data-zoom="1.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] bg-white text-black font-bold flex items-center justify-center">
-          <span class="rotate-smooth icon-rotate">1</span>
-        </button>
-        <button data-zoom="2.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">
-          <span class="rotate-smooth icon-rotate">2</span>
-        </button>
-        <button data-zoom="3.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">
-          <span class="rotate-smooth icon-rotate">3</span>
-        </button>
-        <button data-zoom="5.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">
-          <span class="rotate-smooth icon-rotate">5</span>
-        </button>
+        <button data-zoom="0.5" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">.5</button>
+        <button data-zoom="1.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] bg-white text-black font-bold flex items-center justify-center">1</button>
+        <button data-zoom="2.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">2</button>
+        <button data-zoom="3.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">3</button>
+        <button data-zoom="5.0" class="zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center">5</button>
       </div>
     </div>
   </aside>
 
-  <!-- CONTROLO PRINCIPAL (CARROSSEL, SHUTTER REC, FOTO RÁPIDA, GALERIA) -->
+  <!-- CONTROLO PRINCIPAL (CARROSSEL, SHUTTER, FOTO RÁPIDA, GALERIA) -->
   <footer class="absolute bottom-6 inset-x-0 z-30 flex flex-col items-center gap-4 pointer-events-auto">
-    <!-- Carrossel de Modos -->
+    <!-- Carrossel de Modos: FOTO | VÍDEO | CINE -->
     <nav class="flex items-center gap-6">
       <button class="mode-btn flex flex-col items-center gap-1 text-white/40 font-mono text-[11px] tracking-widest uppercase" data-mode="FOTO">
-        <span class="rotate-smooth icon-rotate">FOTO</span>
+        <span>FOTO</span>
         <div class="w-1 h-1 rounded-full bg-transparent"></div>
       </button>
       <button class="mode-btn flex flex-col items-center gap-1 text-white font-bold font-mono text-[11px] tracking-widest uppercase" data-mode="VÍDEO">
-        <span class="rotate-smooth icon-rotate">VÍDEO</span>
+        <span>VÍDEO</span>
         <div class="w-1 h-1 rounded-full bg-white"></div>
       </button>
       <button class="mode-btn flex flex-col items-center gap-1 text-white/40 font-mono text-[11px] tracking-widest uppercase" data-mode="CINE">
-        <span class="rotate-smooth icon-rotate">CINE</span>
+        <span>CINE</span>
         <div class="w-1 h-1 rounded-full bg-transparent"></div>
       </button>
     </nav>
@@ -137,64 +150,87 @@
     <!-- Tríade de Captura -->
     <div class="w-full max-w-xs px-6 flex items-center justify-between">
       <!-- Miniatura Galeria -->
-      <button class="w-11 h-11 rounded-xl bg-white/[0.06] backdrop-blur-xl border border-white/20 p-0.5 flex items-center justify-center hover:opacity-80 active:scale-95 transition-all">
-        <div class="w-full h-full rounded-[10px] bg-neutral-900 flex items-center justify-center">
-          <i data-lucide="image" class="w-4 h-4 text-white/70 rotate-smooth icon-rotate"></i>
+      <button id="btnGallery" class="w-11 h-11 rounded-xl bg-white/[0.06] backdrop-blur-xl border border-white/20 p-0.5 flex items-center justify-center hover:opacity-80 active:scale-95 transition-all overflow-hidden" title="Galeria">
+        <div id="galleryThumbContainer" class="w-full h-full rounded-[10px] bg-neutral-900 flex items-center justify-center">
+          <i data-lucide="image" class="w-4 h-4 text-white/70"></i>
         </div>
       </button>
 
-      <!-- Botão REC Central -->
+      <!-- Botão Central (Obturador Foto ou Vídeo REC) -->
       <div class="flex flex-col items-center gap-1">
-        <button id="shutterBtn" class="relative w-18 h-18 rounded-full border-2 border-white/80 p-1 flex items-center justify-center active:scale-95 transition-all">
+        <button id="shutterBtn" class="relative w-18 h-18 rounded-full border-2 border-white/85 p-1 flex items-center justify-center active:scale-95 transition-all">
           <div id="shutterCore" class="w-14 h-14 rounded-full bg-white transition-all duration-300"></div>
         </button>
-        <span id="timecodeDisplay" class="font-mono text-[9px] font-bold text-white tracking-widest hidden rotate-smooth icon-rotate">00:00</span>
       </div>
 
-      <!-- Botão Foto Rápida -->
-      <button id="btnQuickPhoto" class="w-11 h-11 rounded-full bg-white/[0.06] backdrop-blur-xl border border-white/20 flex items-center justify-center hover:bg-white/10 active:scale-90 transition-all">
-        <i data-lucide="camera" class="w-4 h-4 text-white rotate-smooth icon-rotate"></i>
+      <!-- Botão Foto Rápida / Trocar -->
+      <button id="btnQuickPhoto" class="w-11 h-11 rounded-full bg-white/[0.06] backdrop-blur-xl border border-white/20 flex items-center justify-center hover:bg-white/10 active:scale-90 transition-all" title="Foto Rápida">
+        <i data-lucide="camera" class="w-4 h-4 text-white"></i>
       </button>
     </div>
   </footer>
 
+  <!-- Toast de Notificação -->
+  <div id="toastMessage" class="absolute bottom-24 inset-x-0 mx-auto w-fit px-3 py-1.5 rounded-full bg-neutral-900/90 border border-white/20 text-[11px] font-medium text-white shadow-2xl opacity-0 pointer-events-none transition-opacity duration-300 z-50"></div>
+
   <script>
-    // 1. Inicializar Ícones Lucide
     lucide.createIcons();
 
-    // 2. Acesso à Câmera Traseira Real (Chrome Android & Safari iOS)
     const video = document.getElementById('cameraFeed');
+    const photoCanvas = document.getElementById('photoCanvas');
+    const flashOverlay = document.getElementById('flashOverlay');
+    const toast = document.getElementById('toastMessage');
+
     let videoStream = null;
     let audioContext = null;
     let analyser = null;
+    let activeFacingMode = 'environment';
+    let currentMode = 'VÍDEO';
+    let activeResolution = '4K';
+    let activeFPS = 30;
+    let zoomLevel = 1.0;
+    let exposureVal = 0.5;
 
+    function showToast(msg) {
+      toast.innerText = msg;
+      toast.style.opacity = '1';
+      setTimeout(() => { toast.style.opacity = '0'; }, 2500);
+    }
+
+    // 1. Inicializar Câmera
     async function initCamera() {
+      if (videoStream) {
+        videoStream.getTracks().forEach(t => t.stop());
+      }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: 'environment',
-            width: { ideal: 3840 },
-            height: { ideal: 2160 }
+            facingMode: activeFacingMode,
+            width: { ideal: activeResolution === '4K' ? 3840 : (activeResolution === '1080p' ? 1920 : 1280) },
+            height: { ideal: activeResolution === '4K' ? 2160 : (activeResolution === '1080p' ? 1080 : 720) },
+            frameRate: { ideal: activeFPS }
           },
           audio: true
         });
         video.srcObject = stream;
         videoStream = stream;
         initAudioVU(stream);
+        applyZoom(zoomLevel);
+        applyExposure(exposureVal);
       } catch (err) {
-        console.warn('Câmera ambiente não disponível, tentando fallback:', err);
+        console.warn('Erro ao inicializar câmera:', err);
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-          video.srcObject = stream;
-          videoStream = stream;
-          initAudioVU(stream);
+          const fallback = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          video.srcObject = fallback;
+          videoStream = fallback;
+          initAudioVU(fallback);
         } catch (e) {
-          console.error('Permissão de câmera recusada:', e);
+          showToast('Permissão de câmera negada');
         }
       }
     }
 
-    // 3. Medidor VU de Áudio Dinâmico
+    // 2. VU Meter Real de Áudio
     function initAudioVU(stream) {
       try {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -213,7 +249,6 @@
           let sum = 0;
           for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
           const avg = sum / dataArray.length / 255;
-
           vu1.style.opacity = avg > 0.05 ? '1' : '0.3';
           vu2.style.opacity = avg > 0.25 ? '1' : '0.3';
           vu3.style.opacity = avg > 0.55 ? '1' : '0.3';
@@ -221,44 +256,271 @@
         }
         updateVU();
       } catch (e) {
-        console.warn('Web Audio indisponível:', e);
+        console.warn('Web Audio offline:', e);
       }
     }
 
-    // 4. Rotação Fluida de Eixo (Decoupled Node Rotation)
-    let currentAngle = 0;
-    function updateOrientation() {
-      const isLandscape = window.innerWidth > window.innerHeight;
-      let angle = 0;
+    // 3. Controle de Luz / Exposição
+    const expContainer = document.getElementById('exposureContainer');
+    const expTrack = document.getElementById('exposureTrack');
+    const expThumb = document.getElementById('exposureThumb');
+    const evLabel = document.getElementById('evLabel');
 
-      if (screen.orientation && screen.orientation.type) {
-        if (screen.orientation.type.includes('landscape-primary')) angle = 90;
-        else if (screen.orientation.type.includes('landscape-secondary')) angle = -90;
-        else angle = 0;
-      } else if (typeof window.orientation !== 'undefined') {
-        angle = window.orientation === 90 ? 90 : (window.orientation === -90 ? -90 : 0);
+    function applyExposure(val) {
+      exposureVal = val;
+      // Map 0.0 (dark) -> 0.5 (neutral) -> 1.0 (bright)
+      // Visual feedback via video brightness filter and EV text
+      const brightnessFactor = (val * 1.6 + 0.2).toFixed(2);
+      video.style.filter = `brightness(${brightnessFactor})`;
+      const ev = ((val - 0.5) * 4.0).toFixed(1);
+      evLabel.innerText = `${ev > 0 ? '+' : ''}${ev} EV`;
+    }
+
+    let isDraggingExp = false;
+    expContainer.addEventListener('pointerdown', (e) => {
+      isDraggingExp = true;
+      expTrack.className = 'w-[4px] bg-white opacity-90 rounded-full h-full shadow-[0_0_10px_rgba(255,255,255,0.7)] transition-all';
+      evLabel.style.opacity = '1';
+      handleExpMove(e);
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!isDraggingExp) return;
+      handleExpMove(e);
+    });
+
+    window.addEventListener('pointerup', () => {
+      if (!isDraggingExp) return;
+      isDraggingExp = false;
+      expTrack.className = 'w-[2px] bg-white opacity-15 rounded-full h-full transition-all duration-200';
+      setTimeout(() => { evLabel.style.opacity = '0'; }, 600);
+    });
+
+    function handleExpMove(e) {
+      const rect = expContainer.getBoundingClientRect();
+      const clampedY = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+      const normalized = 1.0 - (clampedY / rect.height);
+      expThumb.style.top = `${clampedY}px`;
+      applyExposure(normalized);
+    }
+
+    // 4. Zoom 0.5x a 5x
+    function applyZoom(factor) {
+      zoomLevel = factor;
+      document.getElementById('zoomLabel').innerText = `${factor}×`;
+      if (videoStream) {
+        const track = videoStream.getVideoTracks()[0];
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        if (caps.zoom) {
+          track.applyConstraints({ advanced: [{ zoom: factor }] }).catch(() => {});
+        } else {
+          video.style.transform = `scale(${Math.max(0.7, factor)})`;
+        }
+      }
+    }
+
+    const btnZoomToggle = document.getElementById('btnZoomToggle');
+    const zoomPresets = document.getElementById('zoomPresets');
+    let isZoomExpanded = false;
+
+    btnZoomToggle.addEventListener('click', () => {
+      isZoomExpanded = !isZoomExpanded;
+      if (isZoomExpanded) {
+        zoomPresets.classList.remove('max-w-0', 'opacity-0');
+        zoomPresets.classList.add('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
       } else {
-        angle = isLandscape ? 90 : 0;
+        zoomPresets.classList.remove('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
+        zoomPresets.classList.add('max-w-0', 'opacity-0');
       }
-      currentAngle = angle;
+    });
 
-      document.querySelectorAll('.icon-rotate').forEach(el => {
-        el.style.transform = `rotate(${angle}deg)`;
+    document.querySelectorAll('.zoom-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const z = parseFloat(btn.getAttribute('data-zoom'));
+        applyZoom(z);
+        document.querySelectorAll('.zoom-btn').forEach(b => {
+          b.className = 'zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center';
+        });
+        btn.className = 'zoom-btn w-6 h-6 rounded-full font-mono text-[9px] bg-white text-black font-bold flex items-center justify-center';
+        zoomPresets.classList.remove('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
+        zoomPresets.classList.add('max-w-0', 'opacity-0');
+        isZoomExpanded = false;
       });
+    });
 
-      renderCropGuides(isLandscape);
+    // 5. Trocar Câmera (Front/Back)
+    document.getElementById('btnFlip').addEventListener('click', () => {
+      activeFacingMode = activeFacingMode === 'environment' ? 'user' : 'environment';
+      initCamera();
+      showToast(activeFacingMode === 'environment' ? 'Câmera Traseira' : 'Câmera Frontal');
+    });
+
+    // 6. Seleção de Modos: FOTO | VÍDEO | CINE
+    const shutterBtn = document.getElementById('shutterBtn');
+    const shutterCore = document.getElementById('shutterCore');
+
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.getAttribute('data-mode');
+        currentMode = mode;
+        document.querySelectorAll('.mode-btn').forEach(b => {
+          b.classList.remove('text-white', 'font-bold');
+          b.classList.add('text-white/40');
+          b.querySelector('div').className = 'w-1 h-1 rounded-full bg-transparent';
+        });
+        btn.classList.remove('text-white/40');
+        btn.classList.add('text-white', 'font-bold');
+        btn.querySelector('div').className = 'w-1 h-1 rounded-full bg-white';
+
+        if (mode === 'CINE') {
+          activeFPS = 24;
+          updateQualityLabel();
+          initCamera();
+          showToast('Modo Cinema (24 FPS)');
+        } else if (mode === 'FOTO') {
+          shutterCore.className = 'w-14 h-14 rounded-full bg-white transition-all duration-300';
+          showToast('Modo Foto');
+        } else {
+          activeFPS = 30;
+          updateQualityLabel();
+          showToast('Modo Vídeo (30 FPS)');
+        }
+        renderCropGuides(window.innerWidth > window.innerHeight);
+      });
+    });
+
+    // 7. Captura de Foto Real (Canvas Stills)
+    function capturePhoto() {
+      flashOverlay.style.opacity = '0.9';
+      setTimeout(() => { flashOverlay.style.opacity = '0'; }, 180);
+
+      const w = video.videoWidth || 1920;
+      const h = video.videoHeight || 1080;
+      photoCanvas.width = w;
+      photoCanvas.height = h;
+      const ctx = photoCanvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, w, h);
+
+      photoCanvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `DualCam_Photo_${Date.now()}.jpg`;
+        a.click();
+
+        // Atualizar miniatura da galeria
+        const thumbContainer = document.getElementById('galleryThumbContainer');
+        thumbContainer.innerHTML = `<img src="${url}" class="w-full h-full object-cover rounded-[10px]" />`;
+        showToast('Foto salva!');
+      }, 'image/jpeg', 0.95);
     }
 
-    window.addEventListener('resize', updateOrientation);
-    window.addEventListener('orientationchange', updateOrientation);
-    if (screen.orientation) screen.orientation.addEventListener('change', updateOrientation);
+    document.getElementById('btnQuickPhoto').addEventListener('click', capturePhoto);
 
-    // 5. Renderização das Guias de Corte Adaptativas
+    // 8. Gravação de Vídeo Real
+    let isRecording = false;
+    let recSeconds = 0;
+    let recTimer = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    const recordingTimerBadge = document.getElementById('recordingTimerBadge');
+    const timecodeTop = document.getElementById('timecodeTop');
+
+    shutterBtn.addEventListener('click', () => {
+      if (currentMode === 'FOTO') {
+        capturePhoto();
+        return;
+      }
+
+      isRecording = !isRecording;
+      if (isRecording) {
+        // Gravar
+        shutterCore.className = 'w-7 h-7 rounded-[6px] bg-red-500 transition-all duration-300';
+        recordingTimerBadge.classList.remove('hidden');
+        recordingTimerBadge.classList.add('flex');
+        recSeconds = 0;
+        timecodeTop.innerText = '00:00';
+
+        recTimer = setInterval(() => {
+          recSeconds++;
+          const m = Math.floor(recSeconds / 60).toString().padStart(2, '0');
+          const s = (recSeconds % 60).toString().padStart(2, '0');
+          timecodeTop.innerText = `${m}:${s}`;
+        }, 1000);
+
+        if (videoStream) {
+          recordedChunks = [];
+          mediaRecorder = new MediaRecorder(videoStream, { mimeType: 'video/webm;codecs=vp8,opus' });
+          mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+          mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `DualCam_${currentMode === 'CINE' ? 'Cine_24fps' : 'Video'}_${Date.now()}.webm`;
+            a.click();
+            showToast('Vídeo salvo na Galeria!');
+          };
+          mediaRecorder.start();
+        }
+      } else {
+        // Parar
+        shutterCore.className = 'w-14 h-14 rounded-full bg-white transition-all duration-300';
+        recordingTimerBadge.classList.add('hidden');
+        recordingTimerBadge.classList.remove('flex');
+        clearInterval(recTimer);
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+      }
+    });
+
+    // 9. Dropdown de Qualidade
+    const btnQuality = document.getElementById('btnQuality');
+    const qualityMenu = document.getElementById('qualityMenu');
+    btnQuality.addEventListener('click', () => {
+      qualityMenu.classList.toggle('hidden');
+    });
+
+    function updateQualityLabel() {
+      document.getElementById('qualityLabel').innerText = `${activeResolution} UHD · ${activeFPS}FPS`;
+    }
+
+    document.querySelectorAll('.quality-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeResolution = btn.getAttribute('data-res');
+        updateQualityLabel();
+        qualityMenu.classList.add('hidden');
+        initCamera();
+        showToast(`Qualidade: ${activeResolution}`);
+      });
+    });
+
+    document.querySelectorAll('.fps-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeFPS = parseInt(btn.getAttribute('data-fps'), 10);
+        updateQualityLabel();
+        qualityMenu.classList.add('hidden');
+        initCamera();
+        showToast(`Taxa: ${activeFPS} FPS`);
+      });
+    });
+
+    // 10. Botão Galeria
+    document.getElementById('btnGallery').addEventListener('click', () => {
+      showToast('Abrindo downloads/galeria...');
+    });
+
+    // 11. Guias de Corte
     let showGrid = true;
+    document.getElementById('btnGrid').addEventListener('click', () => {
+      showGrid = !showGrid;
+      renderCropGuides(window.innerWidth > window.innerHeight);
+    });
+
     function renderCropGuides(isLandscape) {
       const container = document.getElementById('cropGuidesContainer');
       if (isLandscape) {
-        // Landscape: 16:9 full; corte 9:16 vertical no meio com 30% dimming nas laterais
         container.innerHTML = `
           <div class="w-full h-full flex items-center justify-center">
             <div class="h-full flex-1 bg-black/30 backdrop-blur-[0.5px]"></div>
@@ -267,14 +529,13 @@
               ${renderReticle()}
               ${showGrid ? renderGrid() : ''}
               <span class="absolute top-4 px-2 py-0.5 rounded-full bg-white/[0.08] backdrop-blur-md border border-white/10 text-[9px] font-mono tracking-widest text-white/70">
-                9:16 SAFE ZONE
+                9:16
               </span>
             </div>
             <div class="h-full flex-1 bg-black/30 backdrop-blur-[0.5px]"></div>
           </div>
         `;
       } else {
-        // Portrait: 9:16 vertical; corte 16:9 horizontal no meio com 30% dimming topo/base
         container.innerHTML = `
           <div class="w-full h-full flex flex-col items-center justify-center">
             <div class="w-full flex-1 bg-black/30 backdrop-blur-[0.5px]"></div>
@@ -283,7 +544,7 @@
               ${renderReticle()}
               ${showGrid ? renderGrid() : ''}
               <span class="absolute top-2 left-4 px-2 py-0.5 rounded-full bg-white/[0.08] backdrop-blur-md border border-white/10 text-[9px] font-mono tracking-widest text-white/70">
-                16:9 CROP
+                16:9
               </span>
             </div>
             <div class="w-full flex-1 bg-black/30 backdrop-blur-[0.5px]"></div>
@@ -329,125 +590,10 @@
       `;
     }
 
-    // 6. Gravação Real & Shutter
-    let isRecording = false;
-    let recSeconds = 0;
-    let recTimer = null;
-    let mediaRecorder = null;
-    let recordedChunks = [];
+    window.addEventListener('resize', () => renderCropGuides(window.innerWidth > window.innerHeight));
 
-    const shutterBtn = document.getElementById('shutterBtn');
-    const shutterCore = document.getElementById('shutterCore');
-    const timecodeDisplay = document.getElementById('timecodeDisplay');
-
-    shutterBtn.addEventListener('click', () => {
-      isRecording = !isRecording;
-      if (isRecording) {
-        // Iniciar Gravação
-        shutterCore.className = 'w-7 h-7 rounded-[6px] bg-white transition-all duration-300';
-        timecodeDisplay.classList.remove('hidden');
-        recSeconds = 0;
-        timecodeDisplay.innerText = '00:00';
-        recTimer = setInterval(() => {
-          recSeconds++;
-          const m = Math.floor(recSeconds / 60).toString().padStart(2, '0');
-          const s = (recSeconds % 60).toString().padStart(2, '0');
-          timecodeDisplay.innerText = `${m}:${s}`;
-        }, 1000);
-
-        if (videoStream) {
-          recordedChunks = [];
-          mediaRecorder = new MediaRecorder(videoStream, { mimeType: 'video/webm;codecs=vp8,opus' });
-          mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
-          mediaRecorder.onstop = () => {
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `DualCam_Recording_${Date.now()}.webm`;
-            a.click();
-          };
-          mediaRecorder.start();
-        }
-      } else {
-        // Parar Gravação e Salvar
-        shutterCore.className = 'w-14 h-14 rounded-full bg-white transition-all duration-300';
-        timecodeDisplay.classList.add('hidden');
-        clearInterval(recTimer);
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-          mediaRecorder.stop();
-        }
-      }
-    });
-
-    // 7. Zoom Expansível
-    const btnZoomToggle = document.getElementById('btnZoomToggle');
-    const zoomPresets = document.getElementById('zoomPresets');
-    const zoomLabel = document.getElementById('zoomLabel');
-    let isZoomExpanded = false;
-
-    btnZoomToggle.addEventListener('click', () => {
-      isZoomExpanded = !isZoomExpanded;
-      if (isZoomExpanded) {
-        zoomPresets.classList.remove('max-w-0', 'opacity-0');
-        zoomPresets.classList.add('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
-      } else {
-        zoomPresets.classList.remove('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
-        zoomPresets.classList.add('max-w-0', 'opacity-0');
-      }
-    });
-
-    document.querySelectorAll('.zoom-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const factor = btn.getAttribute('data-zoom');
-        zoomLabel.innerText = `${factor}×`;
-        document.querySelectorAll('.zoom-btn').forEach(b => {
-          b.className = 'zoom-btn w-6 h-6 rounded-full font-mono text-[9px] text-white/70 hover:text-white flex items-center justify-center';
-        });
-        btn.className = 'zoom-btn w-6 h-6 rounded-full font-mono text-[9px] bg-white text-black font-bold flex items-center justify-center';
-        zoomPresets.classList.remove('max-w-[200px]', 'opacity-100', 'ml-1.5', 'pr-1');
-        zoomPresets.classList.add('max-w-0', 'opacity-0');
-        isZoomExpanded = false;
-      });
-    });
-
-    // 8. Toggles de Grade e Lanterna
-    document.getElementById('btnGrid').addEventListener('click', () => {
-      showGrid = !showGrid;
-      renderCropGuides(window.innerWidth > window.innerHeight);
-    });
-
-    let torchOn = false;
-    document.getElementById('btnTorch').addEventListener('click', async () => {
-      if (!videoStream) return;
-      const track = videoStream.getVideoTracks()[0];
-      try {
-        torchOn = !torchOn;
-        await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-        document.getElementById('btnTorch').style.opacity = torchOn ? '1' : '0.4';
-      } catch (e) {
-        console.warn('Lanterna de hardware não suportada pelo browser:', e);
-      }
-    });
-
-    // 9. Slider de Exposição Interativo
-    const expContainer = document.getElementById('exposureContainer');
-    const expTrack = document.getElementById('exposureTrack');
-    const expThumb = document.getElementById('exposureThumb');
-
-    expContainer.addEventListener('pointerdown', () => {
-      expTrack.className = 'w-[4px] bg-white opacity-90 rounded-full h-full shadow-[0_0_10px_rgba(255,255,255,0.7)] transition-all';
-      expThumb.className = 'absolute top-1/2 -translate-x-1/2 -translate-y-1/2 p-1.5 rounded-full bg-white/20 backdrop-blur-xl border border-white/40 opacity-100 scale-100 transition-all';
-    });
-
-    window.addEventListener('pointerup', () => {
-      expTrack.className = 'w-[2px] bg-white opacity-10 rounded-full h-full transition-all duration-300';
-      expThumb.className = 'absolute top-1/2 -translate-x-1/2 -translate-y-1/2 p-1.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 opacity-30 scale-75 transition-all';
-    });
-
-    // Iniciar tudo
     initCamera();
-    updateOrientation();
+    renderCropGuides(window.innerWidth > window.innerHeight);
   </script>
 </body>
 </html>
